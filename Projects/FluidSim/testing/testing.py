@@ -1,26 +1,31 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+import random
 
 from src.Vector2 import Vector2
 
 # Constants
 L = 10.0  # Size of the box
-N = 100   # Number of water molecules
+N = 500   # Number of water molecules
 dt = 0.01 # Time step
 steps = 1000 # Number of simulation steps
 decay = 0.8
 epsilon = 1.0  # Lennard-Jones potential depth
 sigma = 1.0    # Lennard-Jones potential length scale
-
+mass = 1
 smoothRadius = 2
+
+targetDensity = 1
+pressureMultiplier = 100
 
 # Initialize positions and velocities randomly
 positions = []
 velocities = []
+densities = N * [1]
 
 for i in range(N):
-    positions.append(Vector2(2 * np.random.rand() - 1, 2 * np.random.rand() - 1))
+    positions.append(Vector2(L * np.random.rand() - L/2, L * np.random.rand() - L/2))
     velocities.append(Vector2(0,0))
 
 x_values = [vector.x for vector in positions]
@@ -32,6 +37,79 @@ ax.set_ylim(-L - 2, L + 2)
 scat = ax.scatter(x_values, y_values)
 
 
+def smoothingKernal(radius, dis):
+    volume = np.pi * radius**8 / 4
+    val = max(0, radius * radius - dis * dis)
+    return val * val * val / volume
+
+def smoothingKernalDerivative(radius, dis):
+    if( dis >= radius):
+        return 0
+    f = radius * radius - dis * dis
+    scale = -24 / (np.pi * radius**8)
+    return scale * dis * f * f
+
+
+def calculateDensity(samplePoint):
+    density = 0
+    mass  = 1
+
+    for point in positions:
+        dist = (point - samplePoint).magnitude()
+        influence = smoothingKernal(smoothRadius, dist)
+        density += mass * influence
+    
+    return density
+
+def calculateDensities():
+    for i in range(N):
+        densities[i] = calculateDensity(positions[i])
+
+def convertDensityToPressure(density):
+    densityError = density - targetDensity
+    pressure = densityError * pressureMultiplier
+    return pressure
+
+def GetRandomDir():
+    # Generate random x and y components
+    x = random.uniform(-1, 1)
+    y = random.uniform(-1, 1)
+    
+    # Normalize the vector to get a unit direction vector
+    magnitude = (x ** 2 + y ** 2) ** 0.5
+    if magnitude != 0:
+        x /= magnitude
+        y /= magnitude
+    
+    return Vector2(x, y)
+
+def calculateSharedPressure(densityA, densityB):
+    pressureA = convertDensityToPressure(densityA)
+    pressureB = convertDensityToPressure(densityB)
+    return (pressureA + pressureB) / 2
+
+
+def calculatePressureForce(particleIndex):
+    densityGradient = Vector2()
+
+    for i in range(N):
+        if (particleIndex == i): continue
+
+        offset = (positions[i] - positions[particleIndex])
+        dist = offset.magnitude()
+        dir = GetRandomDir() if dist == 0 else offset / dist
+        slope = smoothingKernalDerivative(smoothRadius, dist)
+        density = densities[i]
+        sharedPressure = calculateSharedPressure(density, densities[particleIndex])
+        densityGradient += convertDensityToPressure(density) * dir * slope * mass / density
+
+    return densityGradient
+
+def calculateDensityForces():
+    for i in range(N):
+        pressureForce = calculatePressureForce(i)
+        pressureAccel = pressureForce / densities[i]
+        velocities[i] += pressureAccel * dt
 
 
 def applyGravity():
@@ -66,11 +144,14 @@ def update(frame):
     # Update positions
     for i in range(N):
         positions[i] += velocities[i] * dt
+
+    calculateDensities()
+    calculateDensityForces()
             
     # Apply boundary conditions
     resolveCollisions()
 
-    applyGravity()
+    #applyGravity()
 
     x_values = np.array([vector.x for vector in positions])
     y_values = np.array([vector.y for vector in positions])
@@ -82,6 +163,6 @@ def update(frame):
     scat.set_offsets(offsets)
 
 # Create animation
-ani = FuncAnimation(fig, update, frames=steps, interval=50)
+ani = FuncAnimation(fig, update, frames=steps)
 
 plt.show()
