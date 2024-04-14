@@ -2,12 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import random
-
+import multiprocessing
 from src.Vector2 import Vector2
 
 # Constants
 L = 10.0  # Size of the box
-N = 500   # Number of water molecules
+N = 1000   # Number of water molecules
 dt = 0.01 # Time step
 steps = 1000 # Number of simulation steps
 decay = 0.8
@@ -62,8 +62,8 @@ def calculateDensity(samplePoint):
     return density
 
 def calculateDensities():
-    for i in range(N):
-        densities[i] = calculateDensity(positions[i])
+    global densities
+    densities = [calculateDensity(samplePoint) for samplePoint in positions]
 
 def convertDensityToPressure(density):
     densityError = density - targetDensity
@@ -89,7 +89,8 @@ def calculateSharedPressure(densityA, densityB):
     return (pressureA + pressureB) / 2
 
 
-def calculatePressureForce(particleIndex):
+def calculatePressureForce(args):
+    particleIndex, positions, densities = args
     densityGradient = Vector2()
 
     for i in range(N):
@@ -105,11 +106,14 @@ def calculatePressureForce(particleIndex):
 
     return densityGradient
 
-def calculateDensityForces():
+def calculateDensityForces(result_queue, densities):
+    global velocities
+
     for i in range(N):
-        pressureForce = calculatePressureForce(i)
+        pressureForce = calculatePressureForce((i, positions, densities))
         pressureAccel = pressureForce / densities[i]
         velocities[i] += pressureAccel * dt
+    result_queue.put(velocities)
 
 
 def applyGravity():
@@ -145,11 +149,19 @@ def update(frame):
     for i in range(N):
         positions[i] += velocities[i] * dt
 
+    # Create a multiprocessing Queue to exchange data between processes
+    result_queue = multiprocessing.Queue()
+
+    # Run functions in separate processes
     calculateDensities()
-    calculateDensityForces()
-            
-    # Apply boundary conditions
-    resolveCollisions()
+    density_force_process = multiprocessing.Process(target=calculateDensityForces, args=(result_queue, densities))
+    
+    # Start processes
+    density_force_process.start()
+    # Wait for all processes to finish
+    density_force_process.join()
+
+    velocities = result_queue.get()
 
     #applyGravity()
 
@@ -161,6 +173,8 @@ def update(frame):
 
     # Set the offsets
     scat.set_offsets(offsets)
+
+    print("step")
 
 # Create animation
 ani = FuncAnimation(fig, update, frames=steps)
