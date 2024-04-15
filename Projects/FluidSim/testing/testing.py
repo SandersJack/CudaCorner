@@ -7,16 +7,16 @@ from src.Vector2 import Vector2
 
 # Constants
 L = 10.0  # Size of the box
-N = 1000   # Number of water molecules
+N = 500   # Number of water molecules
 dt = 0.01 # Time step
 steps = 1000 # Number of simulation steps
 decay = 0.8
 epsilon = 1.0  # Lennard-Jones potential depth
 sigma = 1.0    # Lennard-Jones potential length scale
 mass = 1
-smoothRadius = 2
+smoothRadius = 1.2
 
-targetDensity = 1
+targetDensity = 2.75
 pressureMultiplier = 100
 
 # Initialize positions and velocities randomly
@@ -49,6 +49,17 @@ def smoothingKernalDerivative(radius, dis):
     scale = -24 / (np.pi * radius**8)
     return scale * dis * f * f
 
+def smoothingKernal_new(radius, dis):
+    if( dis >= radius): return 0
+    
+    volume = (np.pi * radius**4) / 6
+    return (radius - dis) * (radius - dis) / volume 
+
+def smoothingKernalDerivative_new(radius, dis):
+    if(dis >= radius): return 0
+
+    scale = 12 / (radius**4 * np.pi)
+    return (dis - radius) * radius
 
 def calculateDensity(samplePoint):
     density = 0
@@ -56,7 +67,7 @@ def calculateDensity(samplePoint):
 
     for point in positions:
         dist = (point - samplePoint).magnitude()
-        influence = smoothingKernal(smoothRadius, dist)
+        influence = smoothingKernal_new(smoothRadius, dist)
         density += mass * influence
     
     return density
@@ -99,21 +110,21 @@ def calculatePressureForce(args):
         offset = (positions[i] - positions[particleIndex])
         dist = offset.magnitude()
         dir = GetRandomDir() if dist == 0 else offset / dist
-        slope = smoothingKernalDerivative(smoothRadius, dist)
+        slope = smoothingKernalDerivative_new(smoothRadius, dist)
         density = densities[i]
         sharedPressure = calculateSharedPressure(density, densities[particleIndex])
-        densityGradient += convertDensityToPressure(density) * dir * slope * mass / density
+        densityGradient += sharedPressure * dir * slope * mass / density
 
     return densityGradient
 
-def calculateDensityForces(result_queue, densities):
+def calculateDensityForces():
     global velocities
 
     for i in range(N):
         pressureForce = calculatePressureForce((i, positions, densities))
         pressureAccel = pressureForce / densities[i]
         velocities[i] += pressureAccel * dt
-    result_queue.put(velocities)
+
 
 
 def applyGravity():
@@ -149,21 +160,13 @@ def update(frame):
     for i in range(N):
         positions[i] += velocities[i] * dt
 
-    # Create a multiprocessing Queue to exchange data between processes
-    result_queue = multiprocessing.Queue()
-
-    # Run functions in separate processes
     calculateDensities()
-    density_force_process = multiprocessing.Process(target=calculateDensityForces, args=(result_queue, densities))
-    
-    # Start processes
-    density_force_process.start()
-    # Wait for all processes to finish
-    density_force_process.join()
+    calculateDensityForces()
 
-    velocities = result_queue.get()
 
     #applyGravity()
+
+    resolveCollisions()
 
     x_values = np.array([vector.x for vector in positions])
     y_values = np.array([vector.y for vector in positions])
