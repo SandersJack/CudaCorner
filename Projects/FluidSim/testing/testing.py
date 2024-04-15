@@ -14,15 +14,28 @@ decay = 0.8
 epsilon = 1.0  # Lennard-Jones potential depth
 sigma = 1.0    # Lennard-Jones potential length scale
 mass = 1
-smoothRadius = 1.2
+smoothRadius = 1
 
 targetDensity = 2.75
-pressureMultiplier = 100
+pressureMultiplier = 1000
 
 # Initialize positions and velocities randomly
 positions = []
 velocities = []
 densities = N * [1]
+
+spatialLookup = np.ones(N)
+startIndex = np.ones(N)
+
+cellOffsets = [[-1, 1],
+	[0, 1],
+	[1, 1],
+	[-1, 0],
+	[0, 0],
+	[1, 0],
+	[-1, -1],
+	[0, -1],
+	[1, -1]]
 
 for i in range(N):
     positions.append(Vector2(L * np.random.rand() - L/2, L * np.random.rand() - L/2))
@@ -100,28 +113,16 @@ def calculateSharedPressure(densityA, densityB):
     return (pressureA + pressureB) / 2
 
 
-def calculatePressureForce(args):
-    particleIndex, positions, densities = args
-    densityGradient = Vector2()
+def calculatePressureForce(particleIndex):
+    global densities, positions
 
-    for i in range(N):
-        if (particleIndex == i): continue
-
-        offset = (positions[i] - positions[particleIndex])
-        dist = offset.magnitude()
-        dir = GetRandomDir() if dist == 0 else offset / dist
-        slope = smoothingKernalDerivative_new(smoothRadius, dist)
-        density = densities[i]
-        sharedPressure = calculateSharedPressure(density, densities[particleIndex])
-        densityGradient += sharedPressure * dir * slope * mass / density
-
-    return densityGradient
+    return EachPointWithinRadius(particleIndex)
 
 def calculateDensityForces():
     global velocities
 
     for i in range(N):
-        pressureForce = calculatePressureForce((i, positions, densities))
+        pressureForce = calculatePressureForce(i)
         pressureAccel = pressureForce / densities[i]
         velocities[i] += pressureAccel * dt
 
@@ -132,7 +133,7 @@ def applyGravity():
     
     # Add Gravity
     for i in range(N):
-        velocities[i].y -= 9.8
+        velocities[i].y -= 1
 
 def resolveCollisions():
     global positions, velocities
@@ -152,6 +153,74 @@ def resolveCollisions():
             positions[i].y = -L + 0.1
             velocities[i].y *= -decay
 
+def PosToCellCoord(point, radius):
+    cellX = int(point.x / radius)
+    cellY = int(point.y / radius)
+    return (cellX, cellY)
+
+def HashCell(cellX, cellY):
+    a = cellX * 15823
+    b = cellY * 9737333
+    return a + b
+
+def GetKeyFromHash(hash):
+    global spatialLookup
+    return int(hash) % int(np.size(spatialLookup))
+
+
+def UpdateSpatialLookup():
+    global spatialLookup, positions
+    for i in range(len(positions)):
+        cellX , cellY = PosToCellCoord(positions[i], smoothRadius)
+        cellKey = GetKeyFromHash(HashCell(cellX, cellY))
+        spatialLookup[i] = cellKey
+        startIndex[i] = -99
+
+    spatialLookup = np.sort(spatialLookup)
+
+    for t in range(len(positions)):
+        key = int(spatialLookup[t])
+        keyPrev = -99 if t == 0 else spatialLookup[t - 1]
+        if(key != keyPrev):
+            startIndex[key] = t
+
+
+def EachPointWithinRadius(sampleIndex):
+    global positions, densities
+    samplePoint = positions[sampleIndex]
+    centerX, centerY = PosToCellCoord(samplePoint, smoothRadius)
+    sqrtRadius = smoothRadius * smoothRadius
+
+    pressureForce = Vector2()
+
+    for i in range(len(cellOffsets)):
+
+        key = GetKeyFromHash(HashCell(centerX + cellOffsets[i][0], centerY + cellOffsets[i][1]))
+        cellStartIndex = startIndex[key]
+
+        for t in range(int(cellStartIndex), np.size(spatialLookup)):
+            if spatialLookup[t] != key: break
+
+            particleIndex = t
+            sqrDist = ((positions[particleIndex] - samplePoint).magnitude())**2
+
+            if (sqrDist <= sqrtRadius):
+                #print("Boom")
+                # Do somthing
+                if (particleIndex == sampleIndex): continue
+
+                offset = (positions[particleIndex] - samplePoint)
+                dist = offset.magnitude()
+                dir = GetRandomDir() if dist == 0 else offset / dist
+                slope = smoothingKernalDerivative_new(smoothRadius, dist)
+                density = densities[particleIndex]
+                
+                sharedPressure = calculateSharedPressure(density, densities[particleIndex])
+                pressureForce += sharedPressure * dir * slope * mass / density
+    #print(pressureForce)
+    return pressureForce
+
+
 # Update function for the animation
 def update(frame):
     global positions, velocities
@@ -160,11 +229,14 @@ def update(frame):
     for i in range(N):
         positions[i] += velocities[i] * dt
 
+
+    UpdateSpatialLookup()
+
     calculateDensities()
     calculateDensityForces()
 
 
-    #applyGravity()
+    applyGravity()
 
     resolveCollisions()
 
