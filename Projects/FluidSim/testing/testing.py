@@ -115,12 +115,11 @@ def calculateSharedPressure(densityA, densityB):
 
 def calculatePressureForce(particleIndex):
     global densities, positions
-
     return EachPointWithinRadius(particleIndex)
 
 def calculateDensityForces():
     global velocities
-
+    ### Loop over all points and calculate the density
     for i in range(N):
         pressureForce = calculatePressureForce(i)
         pressureAccel = pressureForce / densities[i]
@@ -130,14 +129,13 @@ def calculateDensityForces():
 
 def applyGravity():
     global positions, velocities
-    
-    # Add Gravity
+    ### Loop over all particles and add Gravity
     for i in range(N):
         velocities[i].y -= 1
 
 def resolveCollisions():
     global positions, velocities
-
+    ### Loop over all positions
     for i in range(N):
         if positions[i].x > L:
             positions[i].x = L - 0.1
@@ -154,70 +152,98 @@ def resolveCollisions():
             velocities[i].y *= -decay
 
 def PosToCellCoord(point, radius):
+    ### Each cell is smoothing radius size
     cellX = int(point.x / radius)
     cellY = int(point.y / radius)
     return (cellX, cellY)
 
 def HashCell(cellX, cellY):
+    ### Encode the position within a hash
     a = cellX * 15823
     b = cellY * 9737333
     return a + b
 
 def GetKeyFromHash(hash):
     global spatialLookup
+    ### Divide the hash by the size of the lookuptable to get a key
     return int(hash) % int(np.size(spatialLookup))
 
 
 def UpdateSpatialLookup():
     global spatialLookup, positions
+    ### Loop over all points
     for i in range(len(positions)):
+        ### Calculate the Position to Cell Cord of ponit
         cellX , cellY = PosToCellCoord(positions[i], smoothRadius)
+        ### Hash the position then get a key from the hash
         cellKey = GetKeyFromHash(HashCell(cellX, cellY))
+        ### Save this key in the point position
         spatialLookup[i] = cellKey
+        ### Set a non value for the index
         startIndex[i] = -99
 
+    ### Sort the array
     spatialLookup = np.sort(spatialLookup)
 
+    ### Loop again over all positions
     for t in range(len(positions)):
+        ### Find the cellKey at this position
         key = int(spatialLookup[t])
         keyPrev = -99 if t == 0 else spatialLookup[t - 1]
+        ## If the key is not the same as the previous, set the start Index as this denotes the first point in this cell
         if(key != keyPrev):
             startIndex[key] = t
 
 
 def EachPointWithinRadius(sampleIndex):
     global positions, densities
+    ### Get the sample point
     samplePoint = positions[sampleIndex]
+    ### Get the Cell value of the sample pont
     centerX, centerY = PosToCellCoord(samplePoint, smoothRadius)
+    ### Get the square of the smoothing radius
     sqrtRadius = smoothRadius * smoothRadius
 
+    ### Set emtpy pressure Force
     pressureForce = Vector2()
 
+    ### Loop over the cell offsets
     for i in range(len(cellOffsets)):
-
+        ### Get the key of the adjacent/same search cell
         key = GetKeyFromHash(HashCell(centerX + cellOffsets[i][0], centerY + cellOffsets[i][1]))
+        ### Get the start index for the first point in that cell
         cellStartIndex = startIndex[key]
 
+        ### Loop from that start index to the end of the lookup
         for t in range(int(cellStartIndex), np.size(spatialLookup)):
+            ### If te lookup value is the same as the key break
             if spatialLookup[t] != key: break
 
+            ### Set the particle index
             particleIndex = t
+            ### Calculate the square distance between the sample point and this particle in the test cell
             sqrDist = ((positions[particleIndex] - samplePoint).magnitude())**2
 
+            ### If it is smaller that smoothing radius then continue on
             if (sqrDist <= sqrtRadius):
-                #print("Boom")
                 # Do somthing
+                ### If the index is the same as the sample, skip as it is the same point
                 if (particleIndex == sampleIndex): continue
 
+                ### Calculate the offset between the two points
                 offset = (positions[particleIndex] - samplePoint)
+                ### Get the magnitude of this offset
                 dist = offset.magnitude()
+                ### Get the direction vector of between the two points, if there the same dist == 0 just choose a random dir
                 dir = GetRandomDir() if dist == 0 else offset / dist
+                ### Calculate the slope of the smoothing function
                 slope = smoothingKernalDerivative_new(smoothRadius, dist)
+                ### Get the point density
                 density = densities[particleIndex]
-                
+                ### Calculate the two points shared pressure
                 sharedPressure = calculateSharedPressure(density, densities[particleIndex])
+                ### Calculate the pressure force
                 pressureForce += sharedPressure * dir * slope * mass / density
-    #print(pressureForce)
     return pressureForce
 
 
