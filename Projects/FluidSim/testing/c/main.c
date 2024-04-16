@@ -12,6 +12,7 @@
 #define WINDOW_HEIGHT 800
 #define NUM_PARTICLES 1000
 
+
 #define DECAY 0.9
 #define MASS 1
 #define SMOOTHRADIUS 10
@@ -19,6 +20,25 @@
 #define PRESSURE_MULT 0.001
 
 #define DT 0.01
+
+int frameCount = 0;
+float fps = 0;
+Uint32 lastFrameTime = 0;
+
+void calculateFPS(Uint32 currentTime) {
+    // Calculate time elapsed since the last frame update
+    float elapsedTime = (currentTime - lastFrameTime) / 1000.0f; // Convert to seconds
+
+    // Update frame count
+    frameCount++;
+
+    // If one second has passed, calculate FPS
+    if (elapsedTime >= 1.0f) {
+        fps = frameCount / elapsedTime;
+        frameCount = 0;
+        lastFrameTime = currentTime;
+    }
+}
 
 int L = WINDOW_WIDTH - 50;
 
@@ -292,6 +312,12 @@ int main(){
                 quit = 1;
         }
 
+        Uint32 currentTime = SDL_GetTicks();
+        calculateFPS(currentTime);
+
+        // Print FPS to terminal
+        printf("\rFPS: %.2f", fps);
+
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black background
         SDL_RenderClear(renderer);
 
@@ -301,6 +327,7 @@ int main(){
         SDL_RenderPresent(renderer);
 
         //sleep(1);
+        fflush(stdout);
     }
 
     SDL_DestroyRenderer(renderer);
