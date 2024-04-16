@@ -241,7 +241,7 @@ def EachPointWithinRadius(sampleIndex):
                 ### Get the point density
                 density = densities[particleIndex]
                 ### Calculate the two points shared pressure
-                sharedPressure = calculateSharedPressure(density, densities[particleIndex])
+                sharedPressure = calculateSharedPressure(density, densities[sampleIndex])
                 ### Calculate the pressure force
                 pressureForce += sharedPressure * dir * slope * mass / density
     return pressureForce
@@ -262,7 +262,7 @@ def update(frame):
     calculateDensityForces()
 
 
-    applyGravity()
+    #applyGravity()
 
     resolveCollisions()
 
