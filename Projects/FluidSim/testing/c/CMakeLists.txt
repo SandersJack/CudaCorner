@@ -7,4 +7,4 @@ include_directories(${SDL2_INCLUDE_DIRS})
 # Add your CUDA source file
 add_executable(fluid_testing main.c)
 
-target_link_libraries(fluid_testing ${SDL2_LIBRARIES})
+target_link_libraries(fluid_testing ${SDL2_LIBRARIES} m)
