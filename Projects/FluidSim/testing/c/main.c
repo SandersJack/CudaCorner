@@ -13,11 +13,11 @@
 #define NUM_PARTICLES 1000
 
 
-#define DECAY 0.9
+#define DECAY 0.5
 #define MASS 1
 #define SMOOTHRADIUS 10
-#define TARGET_PRESSURE 2.75
-#define PRESSURE_MULT 0.001
+#define TARGET_DENSITY 0.021
+#define PRESSURE_MULT 50
 
 #define DT 0.01
 
@@ -45,6 +45,8 @@ int L = WINDOW_WIDTH - 50;
 typedef struct {
     float x;
     float y; 
+    float pred_x;
+    float pred_y;
     float dx;
     float dy;
 } Particle;
@@ -98,7 +100,7 @@ int hashCell(int cellX, int cellY){
 float smoothingKernal_new(float radius, float dis){
     if( dis >= radius) return 0;
     
-    float volume = (M_PI * pow(radius,4)) / 6;
+    float volume = (M_PI * pow(radius, 4)) / 6;
     return (radius - dis) * (radius - dis) / volume;
 }
 
@@ -106,20 +108,24 @@ float smoothingKernalDerivative_new(float radius, float dis){
     if(dis >= radius) return 0;
 
     float scale = 12 / (pow(radius,4) * M_PI);
-    return (dis - radius) * radius;
+    return (dis - radius) * scale;
 }
 
 
 FloatPair posToCellCoord(Particle particle, float radius){
     FloatPair pair;
-    pair.first = (int)(particle.x / radius);
-    pair.second = (int)(particle.y / radius);
+    pair.first = (int)(particle.pred_x / radius);
+    pair.second = (int)(particle.pred_y / radius);
     return pair;
 }
 
 float convertDensityToPressure(float density){
-    float densityError = density - TARGET_PRESSURE;
-    float pressure = densityError * PRESSURE_MULT;
+    float densityError = density / TARGET_DENSITY;
+    float diff = density - TARGET_DENSITY;
+    if (diff < 0) densityError *= -1;
+
+    float pressure =  densityError * PRESSURE_MULT;
+    //printf("CAl Pressure: %f %f %f \n", density, densityError, pressure);
     return pressure;
 }
 
@@ -155,8 +161,8 @@ FloatPair eachPointWithinRadius(int sampleIndex){
 
             int particleIndex = t;
 
-            float dist_X = particles[particleIndex].x - sampleParticle.x;
-            float dist_Y = particles[particleIndex].y - sampleParticle.y;
+            float dist_X = particles[particleIndex].pred_x - sampleParticle.pred_x;
+            float dist_Y = particles[particleIndex].pred_y - sampleParticle.pred_y;
             float sqDist = (dist_X*dist_X + dist_Y*dist_Y);
 
             if(sqDist <= sqRadius){
@@ -169,16 +175,15 @@ FloatPair eachPointWithinRadius(int sampleIndex){
 
                 float slope = smoothingKernalDerivative_new(SMOOTHRADIUS, dist);
                 float density = densities[particleIndex];
-                //printf("Density %f \n", density);
                 float sharedPressure = calculateSharedPressure(density, densities[sampleIndex]);
                 //printf("sharedPressure %f \n", sharedPressure);
                 //printf("pressureForceX %f %f %f %d %f\n", sharedPressure, dir_X, slope, MASS, density);
                 pressureForce.first += sharedPressure * dir_X * slope * MASS / density;
-                pressureForce.second += sharedPressure * dir_Y * slope * MASS / density;
+                pressureForce.second -= sharedPressure * dir_Y * slope * MASS / density;
             } 
         }
     }
-    //printf("PressureForce: %f, %f \n", pressureForce.first, pressureForce.second);
+    //printf("pressureForce %f %f\n", pressureForce.first, pressureForce.second);
     return pressureForce;
 }
 
@@ -193,6 +198,8 @@ void calculateDensityForces(){
         float pressureAccel_Y = pressureForce.second / densities[i];
         particles[i].dx += pressureAccel_X * DT;
         particles[i].dy += pressureAccel_Y * DT;
+
+        //printf("Vel: %f %f \n", particles[i].dx, particles[i].dy);
     }
 }
 
@@ -200,8 +207,8 @@ float calculateDensity(Particle samplePoint){
     float density = 0;
 
     for(int i=0; i<NUM_PARTICLES; i++){
-        float dist_x = samplePoint.x - particles[i].x;
-        float dist_y = samplePoint.y - particles[i].y;
+        float dist_x = samplePoint.pred_x - particles[i].pred_x;
+        float dist_y = samplePoint.pred_y - particles[i].pred_y;
 
         float dist = sqrt(dist_x * dist_x + dist_y * dist_y);
         float influence = smoothingKernal_new(SMOOTHRADIUS, dist);
@@ -212,13 +219,17 @@ float calculateDensity(Particle samplePoint){
 }
 
 void calculateDensities(){
+    float avg = 0;
     for(int i=0;i<NUM_PARTICLES; i++){
         densities[i] = calculateDensity(particles[i]);
+        avg += densities[i];
+        //printf("Densities: %f \n", densities[i]);
     }
+    //printf("Avergae Density %f \n", avg / NUM_PARTICLES);
 }
 
 void applyGravity(int i){
-    particles[i].dy -= 0.1;
+    particles[i].dy -= 1;
 }
 
 void resolveCollisions(int i){
@@ -241,8 +252,9 @@ void resolveCollisions(int i){
 void updateSpatialLookup(){
     for(int i=0; i<NUM_PARTICLES; i++){
         FloatPair cell = posToCellCoord(particles[i], SMOOTHRADIUS);
+        //printf("cellpos: %f %f \n", cell.first, cell.second);
         int cellKey = getKeyFromHash(hashCell(cell.first, cell.second));
-
+        //printf("cellKey: %i \n", cellKey);
         spatialLookup[i] = cellKey;
 
         startIndex[i] = -99;
@@ -253,6 +265,7 @@ void updateSpatialLookup(){
 
     for(int t=0; t<NUM_PARTICLES; t++){
         int key = spatialLookup[t];
+        //printf("key: %i \n", key);
         int keyPrev = (t == 0) ? -99 : spatialLookup[t-1];
 
         if(key != keyPrev){
@@ -262,24 +275,56 @@ void updateSpatialLookup(){
 }
 
 void updateParticles() {
-    for (int i = 0; i < NUM_PARTICLES; i++) {
-        particles[i].x += particles[i].dx * DT;
-        particles[i].y -= particles[i].dy * DT;
 
-        //printf("Particles: %f, %f \n", particles[i].x, particles[i].y);
-        applyGravity(i);
-        resolveCollisions(i);
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+        particles[i].pred_x = particles[i].x + particles[i].dx * DT;
+        particles[i].pred_y = particles[i].y - particles[i].dy * DT;
     }
 
     updateSpatialLookup();
 
     calculateDensities();
     calculateDensityForces();
+
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+        particles[i].x += particles[i].dx * DT;
+        particles[i].y -= particles[i].dy * DT;
+
+        //printf("Pos: %f %f \n", particles[i].x, particles[i].y);
+
+        //printf("Particles: %f, %f \n", particles[i].x, particles[i].y);
+        //applyGravity(i);
+        resolveCollisions(i);
+    }
 }
 
 void renderParticles(SDL_Renderer *renderer) {
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White color
+    //SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White color
     for (int i = 0; i < NUM_PARTICLES; i++) {
+        // Calculate speed magnitude
+        float speed = sqrt(particles[i].dx * particles[i].dx + particles[i].dy * particles[i].dy);
+        //printf("Speed %f \n", speed);
+        // Map speed to a color gradient
+        Uint8 r, g, b;
+        if (speed < 10.0) {
+            // Slow particles are blue
+            r = 0;
+            g = 0;
+            b = 255;
+        } else if (speed < 100.0) {
+            // Medium-speed particles are green
+            r = 0;
+            g = 255;
+            b = 0;
+        } else {
+            // Fast particles are red
+            r = 255;
+            g = 0;
+            b = 0;
+        }
+
+        // Set particle color
+        SDL_SetRenderDrawColor(renderer, r, g, b, 255);
         SDL_RenderDrawPoint(renderer, (int)particles[i].x, (int)particles[i].y);
     }
 }
@@ -316,7 +361,7 @@ int main(){
         calculateFPS(currentTime);
 
         // Print FPS to terminal
-        printf("\rFPS: %.2f", fps);
+        //printf("\rFPS: %.2f", fps);
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black background
         SDL_RenderClear(renderer);
@@ -327,7 +372,7 @@ int main(){
         SDL_RenderPresent(renderer);
 
         //sleep(1);
-        fflush(stdout);
+        //fflush(stdout);
     }
 
     SDL_DestroyRenderer(renderer);
