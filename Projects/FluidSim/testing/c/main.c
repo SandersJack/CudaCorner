@@ -15,9 +15,10 @@
 
 #define DECAY 0.5
 #define MASS 1
-#define SMOOTHRADIUS 10
-#define TARGET_DENSITY 0.021
+#define SMOOTHRADIUS 100
+#define TARGET_DENSITY 0.002 //0.021
 #define PRESSURE_MULT 50
+#define VISCOSITY 10
 
 #define DT 0.01
 
@@ -135,6 +136,44 @@ float calculateSharedPressure(float densityA, float densityB){
     return (pressureA + pressureB) / 2;
 }
 
+FloatPair calculateViscosityForce(int sampleIndex){
+    Particle sampleParticle = particles[sampleIndex];
+
+    FloatPair cell = posToCellCoord(sampleParticle, SMOOTHRADIUS);
+    float centerX = cell.first;
+    float centerY = cell.second;
+
+    float sqRadius = SMOOTHRADIUS * SMOOTHRADIUS;
+
+    FloatPair viscosityForce;
+    viscosityForce.first = 0;
+    viscosityForce.second = 0;
+
+    for(int i=0;i<9; i++){
+        int key = getKeyFromHash(hashCell(centerX + cellOffsets[i][0], centerY + cellOffsets[i][1]));
+        
+        int cellStartIndex = startIndex[key];
+        
+        int sizeOfSL = sizeof(spatialLookup) / sizeof(spatialLookup[0]);
+
+        for(int t=cellStartIndex; t<sizeOfSL; t++){
+
+            if(spatialLookup[t] != key) break;
+
+            int particleIndex = t;
+                float dist_X = particles[particleIndex].pred_x - sampleParticle.pred_x;
+                float dist_Y = particles[particleIndex].pred_y - sampleParticle.pred_y;
+                float dist = sqrt(dist_X*dist_X + dist_Y*dist_Y); 
+
+                float infuence = smoothingKernal_new(SMOOTHRADIUS, dist);
+
+                viscosityForce.first += (particles[t].dx - particles[sampleIndex].dx) * infuence;
+                viscosityForce.second += (particles[t].dy - particles[sampleIndex].dy) * infuence;
+        }
+    }
+    return viscosityForce;
+}
+
 FloatPair eachPointWithinRadius(int sampleIndex){
     Particle sampleParticle = particles[sampleIndex];
 
@@ -176,14 +215,11 @@ FloatPair eachPointWithinRadius(int sampleIndex){
                 float slope = smoothingKernalDerivative_new(SMOOTHRADIUS, dist);
                 float density = densities[particleIndex];
                 float sharedPressure = calculateSharedPressure(density, densities[sampleIndex]);
-                //printf("sharedPressure %f \n", sharedPressure);
-                //printf("pressureForceX %f %f %f %d %f\n", sharedPressure, dir_X, slope, MASS, density);
                 pressureForce.first += sharedPressure * dir_X * slope * MASS / density;
                 pressureForce.second -= sharedPressure * dir_Y * slope * MASS / density;
             } 
         }
     }
-    //printf("pressureForce %f %f\n", pressureForce.first, pressureForce.second);
     return pressureForce;
 }
 
@@ -196,10 +232,13 @@ void calculateDensityForces(){
         FloatPair pressureForce = calculatePressureForce(i);
         float pressureAccel_X = pressureForce.first / densities[i];
         float pressureAccel_Y = pressureForce.second / densities[i];
+        FloatPair viscosityForce = calculateViscosityForce(i);
+        pressureAccel_X += viscosityForce.first * VISCOSITY;
+        pressureAccel_Y += viscosityForce.second * VISCOSITY;
+
         particles[i].dx += pressureAccel_X * DT;
         particles[i].dy += pressureAccel_Y * DT;
 
-        //printf("Vel: %f %f \n", particles[i].dx, particles[i].dy);
     }
 }
 
@@ -223,9 +262,8 @@ void calculateDensities(){
     for(int i=0;i<NUM_PARTICLES; i++){
         densities[i] = calculateDensity(particles[i]);
         avg += densities[i];
-        //printf("Densities: %f \n", densities[i]);
     }
-    //printf("Avergae Density %f \n", avg / NUM_PARTICLES);
+    printf("Avg Density %f \n", avg / NUM_PARTICLES);
 }
 
 void applyGravity(int i){
