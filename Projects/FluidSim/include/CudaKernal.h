@@ -5,6 +5,6 @@
 
 void cuda_kernel();
 
-void __updateParticle(Particle *particles, float *dt, int *NUM_PARTICLES);
+void __updateParticle(Particle *particles, float *dt, int *NUM_PARTICLES, float *densities);
 
 #endif

@@ -44,8 +44,6 @@ void calculateFPS(Uint32 currentTime) {
 }
 
 
-Particle particles[NUM_PARTICLES];
-
 void renderParticles(SDL_Renderer *renderer, Particle *particles) {
     //SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White color
     for (int i = 0; i < NUM_PARTICLES; i++) {
@@ -77,39 +75,6 @@ void renderParticles(SDL_Renderer *renderer, Particle *particles) {
     }
 }
 
-void applyGravity(int i){
-    particles[i].dy -= 1;
-}
-
-void resolveCollisions(int i){
-    if(particles[i].x > L){
-        particles[i].x = L - 0.1;
-        particles[i].dx *= -DECAY;
-    } else if(particles[i].x < 50) {
-        particles[i].x = 50 + 0.1;
-        particles[i].dx *= -DECAY;
-    }
-    if(particles[i].y > L){
-        particles[i].y = L - 0.1;
-        particles[i].dy *= -DECAY;
-    } else if(particles[i].y < 50){
-        particles[i].y = 50 + 0.1;
-        particles[i].dy *= -DECAY;
-    }
-}
-
-void updateParticles(){
-
-    for (int i = 0; i < NUM_PARTICLES; i++) {
-        particles[i].x += particles[i].dx * DT;
-        particles[i].y -= particles[i].dy * DT;
-
-
-        applyGravity(i);
-        resolveCollisions(i);
-    }
-}
-
 int main(){
 
     srand(time(NULL));
@@ -121,6 +86,8 @@ int main(){
     *dt = DT;
 
     Particle* particles = (Particle*)malloc(NUM_PARTICLES * sizeof(Particle));
+
+    float* densities = (float*)malloc(NUM_PARTICLES * sizeof(float));
 
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -157,7 +124,7 @@ int main(){
         //updateParticles();
         //Particle* particles = (Particle*)malloc(NUM_PARTICLES * sizeof(Particle));
         
-        __updateParticle(particles, dt, num_particles);
+        __updateParticle(particles, dt, num_particles, densities);
 
         renderParticles(renderer, particles);
 
