@@ -1,14 +1,10 @@
 #include <cuda_runtime.h>
+#include <curand_kernel.h>
 #include <stdio.h>
 
 extern "C" {
     #include "CudaKernal.h"
 }
-
-typedef struct {
-    float first;
-    float second;
-} FloatPair;
 
 int compare(const void *a, const void *b) {
     const float *x = (const float *)a;
@@ -42,7 +38,7 @@ static __device__ float smoothingKernalDerivative_new(float radius, float dis){
 }
 
 static __device__ void applyGravity(Particle *particles, int id){
-    particles[id].dy -= 1;
+    particles[id].dy -= 0.1;
 }
 
 static __device__ void resolveCollisions(Particle *particles, int id){
@@ -66,18 +62,28 @@ static __device__ void resolveCollisions(Particle *particles, int id){
     }
 }
 
-__global__ void cuda_updateParticle(Particle *particles, float *dt, int *NUM_PARTICLES){
+__global__ void cuda_updateParticle(Particle *particles, float *densities, float *dt, int *NUM_PARTICLES, FloatPair *pressureForce){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx < *NUM_PARTICLES){
 
-        particles[idx].pred_x = particles[idx].x + particles[idx].dx * *dt;
-        particles[idx].pred_y = particles[idx].y - particles[idx].dy * *dt;
+        float pressureAccel_X = pressureForce[idx].first;
+        float pressureAccel_Y = pressureForce[idx].second;
 
-        applyGravity(particles, idx);
+        //printf("Pressure Accel %f %f \n", pressureForce[idx].first, pressureForce[idx].second);
+        //printf("Density %f \n", densities[idx]);
+
+        atomicAdd(&particles[idx].dx , pressureAccel_X * *dt);
+        atomicAdd(&particles[idx].dy , pressureAccel_Y * *dt);
+
+        //applyGravity(particles, idx);
         resolveCollisions(particles, idx);
 
-        particles[idx].x += particles[idx].dx * *dt;
-        particles[idx].y -= particles[idx].dy * *dt;
+        atomicAdd(&particles[idx].x , particles[idx].dx * *dt);
+        atomicAdd(&particles[idx].y , -particles[idx].dy * *dt);
+
+
+        particles[idx].pred_x = particles[idx].x + particles[idx].dx * *dt;
+        particles[idx].pred_y = particles[idx].y - particles[idx].dy * *dt;
 
     }
 }
@@ -95,7 +101,9 @@ void __global__ calculateDensities(float* densities, Particle *particles, int *n
 
         float dist = sqrt(dist_x * dist_x + dist_y * dist_y);
         float influence = smoothingKernal_new(100, dist);
-        densities[idx] += MASS * influence;
+
+        atomicAdd(&densities[idx], MASS * influence);
+        //printf("Pressure Accel %f %f \n", densities[idx], densities[idx]);
 
     }
 }
@@ -139,17 +147,86 @@ __global__ void updateSpacialLookup_step2(Particle *particles, int *spatialLooku
     }
 }
 
-void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, float *h_densities, int *h_spatialLookup, int *h_startIndex){
+__device__ float convertDensityToPressure(float density){
+
+    float TARGET_DENSITY = 0.1;
+    float PRESSURE_MULT = 50;
+
+    float densityError = density / TARGET_DENSITY;
+    float diff = density - TARGET_DENSITY;
+    if (diff < 0) densityError *= -1;
+
+    float pressure =  densityError * PRESSURE_MULT;
+    return pressure;
+}
+
+
+static __device__ float calculateSharedPressure(float densityA, float densityB){
+    float pressureA = convertDensityToPressure(densityA);
+    float pressureB = convertDensityToPressure(densityB);
+    return (pressureA + pressureB) / 2;
+}
+
+
+__device__ float GetRandomDir() {
+    // Initialize curand state for the thread
+    curandState localState;
+    curand_init(clock64(), threadIdx.x, 0, &localState);
+
+    // Generate a random floating-point value between -1 and 1
+    return 2.0f * curand_uniform(&localState) - 1.0f;
+}
+
+__global__ void calculateDensityForces(Particle *particles, FloatPair *pressureForce, float *densities, int *NUM_PARTICLES){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int SMOOTHRADIUS = 100;
+    int MASS = 1;
+
+    int sqRadius = SMOOTHRADIUS * SMOOTHRADIUS;
+
+    if( idx < *NUM_PARTICLES && idy < *NUM_PARTICLES){
+        float dist_X = particles[idy].pred_x - particles[idx].pred_x;
+        float dist_Y = particles[idy].pred_y - particles[idx].pred_y;
+        float sqDist = (dist_X*dist_X + dist_Y*dist_Y);
+
+        if(sqDist <= sqRadius){
+            if(idx == idy) return;
+            
+            float dist = sqrt(sqDist);
+
+            float dir_X = (dist == 0) ? GetRandomDir() : dist_X / dist;
+            float dir_Y = (dist == 0) ? GetRandomDir() : dist_Y / dist;
+
+            float slope = smoothingKernalDerivative_new(SMOOTHRADIUS, dist);
+            float sharedPressure = calculateSharedPressure(densities[idy], densities[idx]);
+
+            float pres_X = sharedPressure * dir_X * slope * MASS / densities[idx];
+            float pres_Y = - sharedPressure * dir_Y * slope * MASS / densities[idx];
+
+            atomicAdd(&pressureForce[idx].first, pres_X);
+
+            atomicAdd(&pressureForce[idx].second, pres_Y);
+        } 
+    }
+}
+
+void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, float *h_densities, int *h_spatialLookup, int *h_startIndex, FloatPair *h_pressureForce){
     // Allocate memory for the array on the GPU
     Particle *d_particles;
     int *d_NUM_PARTICLES, *d_spatialLookup, *d_startIndex;
     float *d_dt, *d_densities;
+    FloatPair *d_pressureForce;
+
     cudaMalloc((void**)&d_particles, *h_NUM_PARTICLES * sizeof(Particle));
     cudaMalloc((void**)&d_NUM_PARTICLES, sizeof(int));
     cudaMalloc((void**)&d_spatialLookup, sizeof(int));
     cudaMalloc((void**)&d_startIndex, sizeof(int));
     cudaMalloc((void**)&d_dt, sizeof(float));
     cudaMalloc((void**)&d_densities, *h_NUM_PARTICLES * sizeof(float));
+    cudaMalloc((void**)&d_pressureForce, *h_NUM_PARTICLES * sizeof(FloatPair));
+
 
     cudaMemcpy(d_particles, h_particles, *h_NUM_PARTICLES * sizeof(Particle), cudaMemcpyHostToDevice);
     cudaMemcpy(d_NUM_PARTICLES, h_NUM_PARTICLES, sizeof(int), cudaMemcpyHostToDevice);
@@ -157,11 +234,9 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
     cudaMemcpy(d_startIndex, h_startIndex, sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_dt, h_dt, sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_densities, h_densities, *h_NUM_PARTICLES * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_pressureForce, h_pressureForce, *h_NUM_PARTICLES * sizeof(FloatPair), cudaMemcpyHostToDevice);
 
-    int blockSize = 256;
-    int numBlocks = (*h_NUM_PARTICLES + blockSize - 1) / blockSize;
-    cuda_updateParticle<<<numBlocks, blockSize>>>(d_particles, d_dt, d_NUM_PARTICLES);
-
+    /*
     updateSpacialLookup_step1<<<numBlocks, blockSize>>>(d_particles, d_spatialLookup, d_startIndex, d_NUM_PARTICLES);
 
     cudaMemcpy(h_spatialLookup, d_spatialLookup, *h_NUM_PARTICLES * sizeof(int), cudaMemcpyDeviceToHost);
@@ -171,11 +246,24 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
 
     updateSpacialLookup_step2<<<numBlocks, blockSize>>>(d_particles, d_spatialLookup, d_startIndex, d_NUM_PARTICLES);
 
-    dim3 blockSize2(512, 512); 
+    cudaDeviceSynchronize();
+    */
+
+    dim3 blockSize2(32, 32); 
     dim3 gridSize2((*h_NUM_PARTICLES + blockSize2.x - 1) / blockSize2.x, (*h_NUM_PARTICLES + blockSize2.y - 1) / blockSize2.y);
 
     calculateDensities<<<gridSize2, blockSize2>>>(d_densities, d_particles, d_NUM_PARTICLES);
     
+    cudaDeviceSynchronize();
+
+    calculateDensityForces<<<gridSize2, blockSize2>>>(d_particles, d_pressureForce, d_densities, d_NUM_PARTICLES);
+
+    cudaDeviceSynchronize();
+
+    int blockSize = 256;
+    int numBlocks = (*h_NUM_PARTICLES + blockSize - 1) / blockSize;
+    cuda_updateParticle<<<numBlocks, blockSize>>>(d_particles, d_densities, d_dt, d_NUM_PARTICLES, d_pressureForce);
+
     cudaDeviceSynchronize();
 
     cudaMemcpy(h_particles, d_particles, *h_NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);

@@ -11,7 +11,7 @@
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 800
-#define NUM_PARTICLES 100000
+#define NUM_PARTICLES 10000
 
 int L = WINDOW_WIDTH - 50;
 
@@ -126,13 +126,15 @@ int main(){
 
         //updateParticles();
         //Particle* particles = (Particle*)malloc(NUM_PARTICLES * sizeof(Particle));
-        
-        __updateParticle(particles, dt, num_particles, densities, spatialLookup, startIndex);
+
+        FloatPair* pressureForces = (FloatPair*)malloc(NUM_PARTICLES * sizeof(FloatPair));
+        __updateParticle(particles, dt, num_particles, densities, spatialLookup, startIndex, pressureForces);
 
         renderParticles(renderer, particles);
 
         SDL_RenderPresent(renderer);
-    
+
+        free(pressureForces);
     }
 
     SDL_DestroyRenderer(renderer);
