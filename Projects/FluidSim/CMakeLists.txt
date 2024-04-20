@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.18)
 project(fluid_testing LANGUAGES CUDA C)
 
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g -G")
+
 find_package(SDL2 REQUIRED)
 include_directories(${SDL2_INCLUDE_DIRS})
 

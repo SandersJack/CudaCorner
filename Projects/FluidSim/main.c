@@ -11,7 +11,7 @@
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 800
-#define NUM_PARTICLES 10000
+#define NUM_PARTICLES 100000
 
 int L = WINDOW_WIDTH - 50;
 
@@ -22,7 +22,7 @@ int L = WINDOW_WIDTH - 50;
 #define PRESSURE_MULT 50
 #define VISCOSITY 10
 
-#define DT 0.01
+#define DT 0.05
 
 int frameCount = 0;
 float fps = 0;
@@ -85,12 +85,34 @@ int main(){
     float* dt = (float*)malloc(sizeof(float));
     *dt = DT;
 
-    Particle* particles = (Particle*)malloc(NUM_PARTICLES * sizeof(Particle));
+    Particle* particles = (Particle*)malloc(*num_particles * sizeof(Particle));
 
-    float* densities = (float*)malloc(NUM_PARTICLES * sizeof(float));
+    float* densities = (float*)malloc(*num_particles * sizeof(float));
 
-    int* spatialLookup = (int*)malloc(NUM_PARTICLES * sizeof(int));
-    SpacialIndex* spacialIndexs = (SpacialIndex*)malloc(NUM_PARTICLES * sizeof(SpacialIndex));
+    int* spatialLookup = (int*)malloc(*num_particles * sizeof(int));
+    SpacialIndex* spacialIndexs = (SpacialIndex*)malloc(*num_particles * sizeof(SpacialIndex));
+
+    FloatPair* pressureForces = (FloatPair*)malloc(*num_particles * sizeof(FloatPair));
+
+
+    IntPair* spacialOffsets = (IntPair*)malloc(9 * sizeof(IntPair));
+
+    int offsets[9][2] = {
+        {-1, 1},
+        {0, 1},
+        {1, 1},
+        {-1, 0},
+        {0, 0},
+        {1, 0},
+        {-1, -1},
+        {0, -1},
+        {1, -1}
+    };
+
+    for(int i=0; i<9; i++){
+        spacialOffsets[i].first = offsets[i][0]; spacialOffsets[i].second = offsets[i][1];
+    }
+
 
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -105,6 +127,8 @@ int main(){
         particles[i].y = (rand() % 100) + WINDOW_HEIGHT/2;
         particles[i].dx = 0; 
         particles[i].dy = 0; 
+        particles[i].pred_x = particles[i].x; 
+        particles[i].pred_x = particles[i].y; 
     }
 
     SDL_Event event;
@@ -124,18 +148,24 @@ int main(){
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black background
         SDL_RenderClear(renderer);
 
-        //updateParticles();
-        //Particle* particles = (Particle*)malloc(NUM_PARTICLES * sizeof(Particle));
 
-        FloatPair* pressureForces = (FloatPair*)malloc(NUM_PARTICLES * sizeof(FloatPair));
-        __updateParticle(particles, dt, num_particles, densities, spatialLookup, spacialIndexs, pressureForces);
+        __updateParticle(particles, dt, num_particles, densities, spatialLookup, spacialIndexs, pressureForces, spacialOffsets);
 
         renderParticles(renderer, particles);
 
         SDL_RenderPresent(renderer);
-
-        free(pressureForces);
     }
+
+    free(num_particles);
+    free(dt);
+    free(particles);
+    free(densities);
+    free(spatialLookup);
+    free(spacialIndexs);
+    free(pressureForces);
+    free(spacialOffsets);
+
+
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
