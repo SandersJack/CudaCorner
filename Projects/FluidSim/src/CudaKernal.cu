@@ -121,31 +121,38 @@ static __device__ int hashCell(int cellX, int cellY){
     return a + b;
 }
 
-static __device__ int getKeyFromHash(int *spatialLookup, int hash){
-    int sizeOfSL = sizeof(spatialLookup) / sizeof(spatialLookup[0]);
-    return hash % sizeOfSL;
+static __device__ int getKeyFromHash(int *NUM_PARTICLES, int hash){
+    return hash % *NUM_PARTICLES;
 }
 
-__global__ void updateSpacialLookup_step1(Particle *particles, int *spatialLookup, int *startIndex, int *NUM_PARTICLES){
+__global__ void updateSpacialLookup_step1(Particle *particles, int *spatialLookup, SpacialIndex *startIndex, int *NUM_PARTICLES){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    FloatPair cell = posToCellCoord(particles[idx], 100);
-    int cellKey = getKeyFromHash(spatialLookup, hashCell(cell.first, cell.second));
-    spatialLookup[idx] = cellKey;
+    if(idx < *NUM_PARTICLES){
+        FloatPair cell = posToCellCoord(particles[idx], 100);
+        int cellKey = getKeyFromHash(NUM_PARTICLES, hashCell(cell.first, cell.second));
+        spatialLookup[idx] = cellKey;
 
-    startIndex[idx] = -99;
-}
-
-__global__ void updateSpacialLookup_step2(Particle *particles, int *spatialLookup, int *startIndex, int *NUM_PARTICLES){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int key = spatialLookup[idx];
-    int keyPrev = (idx == 0) ? -99 : spatialLookup[idx-1];
-
-    if(key != keyPrev){
-        startIndex[key] = idx;
+        startIndex[idx].index = -99;
     }
 }
+
+__global__ void updateSpacialLookup_step2(Particle *particles, int *spatialLookup, SpacialIndex *spacialIndexs, int *NUM_PARTICLES){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if(idx < *NUM_PARTICLES){
+        int key = spatialLookup[idx];
+        int keyPrev = (idx == 0) ? -99 : spatialLookup[idx-1];
+
+        if(key != keyPrev){
+            FloatPair cell = posToCellCoord(particles[idx], 100);
+            uint hash = hashCell(cell.first, cell.second);
+            int cellKey = getKeyFromHash(NUM_PARTICLES, hashCell(cell.first, cell.second));
+            spacialIndexs[idx].index = idx; spacialIndexs[idx].hash = hash; spacialIndexs[idx].key = cellKey; 
+        }
+    }
+}
+
 
 __device__ float convertDensityToPressure(float density){
 
@@ -212,17 +219,21 @@ __global__ void calculateDensityForces(Particle *particles, FloatPair *pressureF
     }
 }
 
-void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, float *h_densities, int *h_spatialLookup, int *h_startIndex, FloatPair *h_pressureForce){
+void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, float *h_densities, int *h_spatialLookup, SpacialIndex *h_spacialIndexs, FloatPair *h_pressureForce){
     // Allocate memory for the array on the GPU
     Particle *d_particles;
-    int *d_NUM_PARTICLES, *d_spatialLookup, *d_startIndex;
+    int *d_NUM_PARTICLES, *d_spatialLookup;
     float *d_dt, *d_densities;
+
     FloatPair *d_pressureForce;
+    SpacialIndex *d_spacialIndexs;
 
     cudaMalloc((void**)&d_particles, *h_NUM_PARTICLES * sizeof(Particle));
     cudaMalloc((void**)&d_NUM_PARTICLES, sizeof(int));
-    cudaMalloc((void**)&d_spatialLookup, sizeof(int));
-    cudaMalloc((void**)&d_startIndex, sizeof(int));
+
+    cudaMalloc((void**)&d_spatialLookup, *h_NUM_PARTICLES * sizeof(int));
+    cudaMalloc((void**)&d_spacialIndexs, *h_NUM_PARTICLES * sizeof(SpacialIndex));
+    
     cudaMalloc((void**)&d_dt, sizeof(float));
     cudaMalloc((void**)&d_densities, *h_NUM_PARTICLES * sizeof(float));
     cudaMalloc((void**)&d_pressureForce, *h_NUM_PARTICLES * sizeof(FloatPair));
@@ -230,25 +241,33 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
 
     cudaMemcpy(d_particles, h_particles, *h_NUM_PARTICLES * sizeof(Particle), cudaMemcpyHostToDevice);
     cudaMemcpy(d_NUM_PARTICLES, h_NUM_PARTICLES, sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_spatialLookup, h_spatialLookup, sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_startIndex, h_startIndex, sizeof(int), cudaMemcpyHostToDevice);
+
+    cudaMemcpy(d_spatialLookup, h_spatialLookup, *h_NUM_PARTICLES * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_spacialIndexs, h_spacialIndexs, *h_NUM_PARTICLES * sizeof(SpacialIndex), cudaMemcpyHostToDevice);
+
     cudaMemcpy(d_dt, h_dt, sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_densities, h_densities, *h_NUM_PARTICLES * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_pressureForce, h_pressureForce, *h_NUM_PARTICLES * sizeof(FloatPair), cudaMemcpyHostToDevice);
 
-    /*
-    updateSpacialLookup_step1<<<numBlocks, blockSize>>>(d_particles, d_spatialLookup, d_startIndex, d_NUM_PARTICLES);
-
+    int blockSize = 256;
+    int numBlocks = (*h_NUM_PARTICLES + blockSize - 1) / blockSize;
+    
+    updateSpacialLookup_step1<<<numBlocks, blockSize>>>(d_particles, d_spatialLookup, d_spacialIndexs, d_NUM_PARTICLES);
+    
+    cudaDeviceSynchronize();
+    
     cudaMemcpy(h_spatialLookup, d_spatialLookup, *h_NUM_PARTICLES * sizeof(int), cudaMemcpyDeviceToHost);
+
     int sizeOfSL = sizeof(h_spatialLookup) / sizeof(h_spatialLookup[0]);
     qsort(h_spatialLookup, sizeOfSL, sizeof(float), compare);
-    cudaMemcpy(d_spatialLookup, h_spatialLookup, sizeof(int), cudaMemcpyHostToDevice);
 
-    updateSpacialLookup_step2<<<numBlocks, blockSize>>>(d_particles, d_spatialLookup, d_startIndex, d_NUM_PARTICLES);
+    cudaMemcpy(d_spatialLookup, h_spatialLookup, sizeof(int), cudaMemcpyHostToDevice);
+    
+    updateSpacialLookup_step2<<<numBlocks, blockSize>>>(d_particles, d_spatialLookup, d_spacialIndexs, d_NUM_PARTICLES);
 
     cudaDeviceSynchronize();
-    */
-
+    
+    
     dim3 blockSize2(32, 32); 
     dim3 gridSize2((*h_NUM_PARTICLES + blockSize2.x - 1) / blockSize2.x, (*h_NUM_PARTICLES + blockSize2.y - 1) / blockSize2.y);
 
@@ -259,20 +278,21 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
     calculateDensityForces<<<gridSize2, blockSize2>>>(d_particles, d_pressureForce, d_densities, d_NUM_PARTICLES);
 
     cudaDeviceSynchronize();
-
-    int blockSize = 256;
-    int numBlocks = (*h_NUM_PARTICLES + blockSize - 1) / blockSize;
     cuda_updateParticle<<<numBlocks, blockSize>>>(d_particles, d_densities, d_dt, d_NUM_PARTICLES, d_pressureForce);
 
     cudaDeviceSynchronize();
 
     cudaMemcpy(h_particles, d_particles, *h_NUM_PARTICLES * sizeof(Particle), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_densities, d_densities, *h_NUM_PARTICLES * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_startIndex, d_startIndex, *h_NUM_PARTICLES * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_spacialIndexs, d_spacialIndexs, *h_NUM_PARTICLES * sizeof(SpacialIndex), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_spatialLookup, d_spatialLookup, *h_NUM_PARTICLES * sizeof(int), cudaMemcpyDeviceToHost);
+
 
 
     cudaFree(d_particles);
     cudaFree(d_densities);
     cudaFree(d_NUM_PARTICLES);
     cudaFree(d_dt);
+    cudaFree(d_spacialIndexs);
+    cudaFree(d_spatialLookup);
 }

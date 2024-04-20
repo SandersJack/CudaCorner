@@ -90,7 +90,7 @@ int main(){
     float* densities = (float*)malloc(NUM_PARTICLES * sizeof(float));
 
     int* spatialLookup = (int*)malloc(NUM_PARTICLES * sizeof(int));
-    int* startIndex = (int*)malloc(NUM_PARTICLES * sizeof(int));
+    SpacialIndex* spacialIndexs = (SpacialIndex*)malloc(NUM_PARTICLES * sizeof(SpacialIndex));
 
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -128,7 +128,7 @@ int main(){
         //Particle* particles = (Particle*)malloc(NUM_PARTICLES * sizeof(Particle));
 
         FloatPair* pressureForces = (FloatPair*)malloc(NUM_PARTICLES * sizeof(FloatPair));
-        __updateParticle(particles, dt, num_particles, densities, spatialLookup, startIndex, pressureForces);
+        __updateParticle(particles, dt, num_particles, densities, spatialLookup, spacialIndexs, pressureForces);
 
         renderParticles(renderer, particles);
 
