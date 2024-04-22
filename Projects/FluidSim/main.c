@@ -91,6 +91,10 @@ int main(){
     float* mass = (float*)malloc(sizeof(float));
     *mass = MASS;
 
+    float* pressureMult = (float*)malloc(sizeof(float));
+    *pressureMult = PRESSURE_MULT;
+
+
     Particle* particles = (Particle*)malloc(*num_particles * sizeof(Particle));
 
     float* densities = (float*)malloc(*num_particles * sizeof(float));
@@ -156,7 +160,7 @@ int main(){
 
 
         __updateParticle(particles, dt, num_particles, densities, spatialLookup, spacialIndexs, 
-            pressureForces, spacialOffsets, smoothingRadius, mass);
+            pressureForces, spacialOffsets, smoothingRadius, mass, pressureMult);
 
         renderParticles(renderer, particles);
 
