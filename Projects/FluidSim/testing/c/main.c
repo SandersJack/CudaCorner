@@ -290,9 +290,7 @@ void resolveCollisions(int i){
 void updateSpatialLookup(){
     for(int i=0; i<NUM_PARTICLES; i++){
         FloatPair cell = posToCellCoord(particles[i], SMOOTHRADIUS);
-        //printf("cellpos: %f %f \n", cell.first, cell.second);
         int cellKey = getKeyFromHash(hashCell(cell.first, cell.second));
-        //printf("cellKey: %i \n", cellKey);
         spatialLookup[i] = cellKey;
 
         startIndex[i] = -99;
@@ -303,7 +301,6 @@ void updateSpatialLookup(){
 
     for(int t=0; t<NUM_PARTICLES; t++){
         int key = spatialLookup[t];
-        //printf("key: %i \n", key);
         int keyPrev = (t == 0) ? -99 : spatialLookup[t-1];
 
         if(key != keyPrev){

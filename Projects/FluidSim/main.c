@@ -11,15 +11,15 @@
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 800
-#define NUM_PARTICLES 100000
+#define NUM_PARTICLES 10000
 
 int L = WINDOW_WIDTH - 50;
 
 #define DECAY 0.5
-#define MASS 10000
-#define SMOOTHRADIUS 50
-#define TARGET_DENSITY 0.002 //0.021
-#define PRESSURE_MULT 50
+#define MASS 1000
+#define SMOOTHRADIUS 100
+#define TARGET_DENSITY 0.0015
+#define PRESSURE_MULT 5
 #define VISCOSITY 10
 
 #define DT 0.05
@@ -94,6 +94,9 @@ int main(){
     float* pressureMult = (float*)malloc(sizeof(float));
     *pressureMult = PRESSURE_MULT;
 
+    float* targetDensity = (float*)malloc(sizeof(float));
+    *targetDensity = TARGET_DENSITY;
+
 
     Particle* particles = (Particle*)malloc(*num_particles * sizeof(Particle));
 
@@ -160,7 +163,7 @@ int main(){
 
 
         __updateParticle(particles, dt, num_particles, densities, spatialLookup, spacialIndexs, 
-            pressureForces, spacialOffsets, smoothingRadius, mass, pressureMult);
+            pressureForces, spacialOffsets, smoothingRadius, mass, pressureMult, targetDensity);
 
         renderParticles(renderer, particles);
 
