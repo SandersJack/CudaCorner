@@ -115,10 +115,9 @@ static __device__ uint getKeyFromHash(int *NUM_PARTICLES, uint hash){
 }
 
 
-void __global__ calculateDensities(float* densities, Particle *particles, int *NUM_PARTICLES, int* spatialLookup, SpacialIndex *spacialIndexs, IntPair *offsets, float *smoothingRadius){
+void __global__ calculateDensities(float* densities, Particle *particles, int *NUM_PARTICLES, int* spatialLookup, SpacialIndex *spacialIndexs, IntPair *offsets, 
+        float *smoothingRadius, float *MASS){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int MASS = 1000;
 
     if(idx < *NUM_PARTICLES){
         uIntPair origin_cell = posToCellCoord(particles[idx], *smoothingRadius);
@@ -159,7 +158,7 @@ void __global__ calculateDensities(float* densities, Particle *particles, int *N
 
                 float dist = sqrt(sqrdist);
                 float influence = smoothingKernal_new(*smoothingRadius, dist);
-                density += MASS * influence;
+                density += *MASS * influence;
                 
             }
         }
@@ -222,10 +221,8 @@ __device__ float GetRandomDir() {
 }
 
 __global__ void calculateDensityForces(float* densities, Particle *particles, int *NUM_PARTICLES, int* spatialLookup, 
-    SpacialIndex *spacialIndexs, IntPair *offsets, FloatPair *pressureForces, float* smoothingRadius){
+    SpacialIndex *spacialIndexs, IntPair *offsets, FloatPair *pressureForces, float* smoothingRadius, float *MASS){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int MASS = 1000;
 
     if( idx < *NUM_PARTICLES){
 
@@ -294,11 +291,12 @@ __global__ void calculateDensityForces(float* densities, Particle *particles, in
     }
 }
 
-void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, float *h_densities, int *h_spatialLookup, SpacialIndex *h_spacialIndexs, FloatPair *h_pressureForce, IntPair *h_offsets, float *h_smoothingRadius){
+void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, float *h_densities, int *h_spatialLookup, SpacialIndex *h_spacialIndexs, 
+        FloatPair *h_pressureForce, IntPair *h_offsets, float *h_smoothingRadius, float *h_mass){
     // Allocate memory for the array on the GPU
     Particle *d_particles;
     int *d_NUM_PARTICLES, *d_spatialLookup, *d_spatialLookup2;
-    float *d_dt, *d_densities, *d_smoothingRadius;
+    float *d_dt, *d_densities, *d_smoothingRadius, *d_mass;
 
     FloatPair *d_pressureForce;
     IntPair *d_offsets;
@@ -313,7 +311,8 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
     cudaMalloc((void**)&d_spatialLookup2, *h_NUM_PARTICLES * sizeof(int));
 
     cudaMalloc((void**)&d_spacialIndexs, *h_NUM_PARTICLES * sizeof(SpacialIndex));
-    
+        
+    cudaMalloc((void**)&d_mass, sizeof(float));
     cudaMalloc((void**)&d_smoothingRadius, sizeof(float));
     cudaMalloc((void**)&d_dt, sizeof(float));
     cudaMalloc((void**)&d_densities, *h_NUM_PARTICLES * sizeof(float));
@@ -327,6 +326,7 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
     cudaMemcpy(d_spatialLookup, h_spatialLookup, *h_NUM_PARTICLES * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_spacialIndexs, h_spacialIndexs, *h_NUM_PARTICLES * sizeof(SpacialIndex), cudaMemcpyHostToDevice);
 
+    cudaMemcpy(d_mass, h_mass, sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_smoothingRadius, h_smoothingRadius, sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_dt, h_dt, sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_densities, h_densities, *h_NUM_PARTICLES * sizeof(float), cudaMemcpyHostToDevice);
@@ -386,7 +386,7 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
         exit(0);
     }
 
-    calculateDensities<<<numBlocks, blockSize>>>(d_densities, d_particles, d_NUM_PARTICLES, d_spatialLookup, d_spacialIndexs, d_offsets, d_smoothingRadius);
+    calculateDensities<<<numBlocks, blockSize>>>(d_densities, d_particles, d_NUM_PARTICLES, d_spatialLookup, d_spacialIndexs, d_offsets, d_smoothingRadius, d_mass);
 
     cudaDeviceSynchronize();
 
@@ -398,7 +398,8 @@ void __updateParticle(Particle *h_particles, float *h_dt, int *h_NUM_PARTICLES, 
     }
 
     
-    calculateDensityForces<<<numBlocks, blockSize>>>(d_densities, d_particles, d_NUM_PARTICLES, d_spatialLookup, d_spacialIndexs, d_offsets, d_pressureForce, d_smoothingRadius);
+    calculateDensityForces<<<numBlocks, blockSize>>>(d_densities, d_particles, d_NUM_PARTICLES, d_spatialLookup, d_spacialIndexs, d_offsets, 
+            d_pressureForce, d_smoothingRadius, d_mass);
     cudaDeviceSynchronize();
     cudaError = cudaGetLastError();
     if (cudaError != cudaSuccess) {
