@@ -9,6 +9,6 @@
 
 void cuda_kernel();
 
-void __updateParticle(Particle *particles, float *dt, int *NUM_PARTICLES, float *densities, int *h_spatialLookup, SpacialIndex *h_spacialIndexs, FloatPair *h_pressureForce, IntPair *h_offsets);
+void __updateParticle(Particle *particles, float *dt, int *NUM_PARTICLES, float *densities, int *h_spatialLookup, SpacialIndex *h_spacialIndexs, FloatPair *h_pressureForce, IntPair *h_offsets, float *h_smoothingRadius);
 
 #endif

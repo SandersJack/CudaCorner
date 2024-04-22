@@ -17,7 +17,7 @@ int L = WINDOW_WIDTH - 50;
 
 #define DECAY 0.5
 #define MASS 1
-#define SMOOTHRADIUS 100
+#define SMOOTHRADIUS 50
 #define TARGET_DENSITY 0.002 //0.021
 #define PRESSURE_MULT 50
 #define VISCOSITY 10
@@ -85,6 +85,9 @@ int main(){
     float* dt = (float*)malloc(sizeof(float));
     *dt = DT;
 
+    float* smoothingRadius = (float*)malloc(sizeof(float));
+    *smoothingRadius = SMOOTHRADIUS;
+
     Particle* particles = (Particle*)malloc(*num_particles * sizeof(Particle));
 
     float* densities = (float*)malloc(*num_particles * sizeof(float));
@@ -149,7 +152,7 @@ int main(){
         SDL_RenderClear(renderer);
 
 
-        __updateParticle(particles, dt, num_particles, densities, spatialLookup, spacialIndexs, pressureForces, spacialOffsets);
+        __updateParticle(particles, dt, num_particles, densities, spatialLookup, spacialIndexs, pressureForces, spacialOffsets, smoothingRadius);
 
         renderParticles(renderer, particles);
 
