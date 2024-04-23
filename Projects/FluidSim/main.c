@@ -11,18 +11,20 @@
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 800
-#define NUM_PARTICLES 10000
+#define NUM_PARTICLES 100000
 
 int L = WINDOW_WIDTH - 50;
 
 #define DECAY 0.5
-#define MASS 1000
-#define SMOOTHRADIUS 100
-#define TARGET_DENSITY 0.0015
-#define PRESSURE_MULT 5
+#define MASS 1
+#define SMOOTHRADIUS 5
+#define TARGET_DENSITY 0.035
+#define PRESSURE_MULT 30
 #define VISCOSITY 10
 
-#define DT 0.05
+#define PARTICLE_SIZE 10
+
+#define DT 0.1
 
 int frameCount = 0;
 float fps = 0;
@@ -46,18 +48,35 @@ void calculateFPS(Uint32 currentTime) {
 
 void renderParticles(SDL_Renderer *renderer, Particle *particles) {
     //SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255); // White color
-    for (int i = 0; i < NUM_PARTICLES; i++) {
+    
+    // Define the range of your coordinate system
+    float minX = -10.0;
+    float maxX = 10.0;
+    float minY = -10.0;
+    float maxY = 10.0;
+
+    // Calculate the scaling factors to map from the coordinate system to the window
+    float scaleX = WINDOW_WIDTH / (maxX - minX);
+    float scaleY = WINDOW_HEIGHT / (maxY - minY);
+
+    for(int i = 0; i < NUM_PARTICLES; i++) {
+        // Map particle coordinates to window coordinates
+        int x = (int)((particles[i].x - minX) * scaleX);
+        int y = (int)((particles[i].y - minY) * scaleY);
+
+        //printf("Pos %f %f \n", particles[i].x, particles[i].y);
+
         // Calculate speed magnitude
         float speed = sqrt(particles[i].dx * particles[i].dx + particles[i].dy * particles[i].dy);
-        //printf("Speed %f \n", speed);
+
         // Map speed to a color gradient
         Uint8 r, g, b;
-        if (speed < 10.0) {
+        if (speed < 0.1) {
             // Slow particles are blue
             r = 0;
             g = 0;
             b = 255;
-        } else if (speed < 100.0) {
+        } else if (speed < 1.0) {
             // Medium-speed particles are green
             r = 0;
             g = 255;
@@ -71,8 +90,15 @@ void renderParticles(SDL_Renderer *renderer, Particle *particles) {
 
         // Set particle color
         SDL_SetRenderDrawColor(renderer, r, g, b, 255);
-        SDL_RenderDrawPoint(renderer, (int)particles[i].x, (int)particles[i].y);
+        
+        // Render particle as a filled rectangle with specified size
+        SDL_Rect particleRect = {x - PARTICLE_SIZE / 2, y - PARTICLE_SIZE / 2, PARTICLE_SIZE, PARTICLE_SIZE};
+        SDL_RenderFillRect(renderer, &particleRect);
     }
+}
+
+float getRandomFloatInRange(float min, float max) {
+    return min + ((float)rand() / RAND_MAX) * (max - min);
 }
 
 int main(){
@@ -136,8 +162,9 @@ int main(){
 
     // Initialize particle positions and velocities
     for (int i = 0; i < NUM_PARTICLES; i++) {
-        particles[i].x = (rand() % 100) + WINDOW_WIDTH /2;
-        particles[i].y = (rand() % 100) + WINDOW_HEIGHT/2;
+        particles[i].x = getRandomFloatInRange(-3,3);
+        particles[i].y = getRandomFloatInRange(-3,3);
+        //printf("Start %f %f \n", particles[i].x, particles[i].y);
         particles[i].dx = 0; 
         particles[i].dy = 0; 
         particles[i].pred_x = particles[i].x; 
@@ -168,6 +195,8 @@ int main(){
         renderParticles(renderer, particles);
 
         SDL_RenderPresent(renderer);
+
+        //exit(0);
     }
 
     free(num_particles);
