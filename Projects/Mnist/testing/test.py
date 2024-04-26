@@ -67,9 +67,9 @@ print(X_train)
 ## NN
 
 def init_params():
-    W1 = np.random.normal(size=(10, 784)) * np.sqrt(1./784)
-    B1 = np.random.normal(size=(10, 1)) * np.sqrt(1./10)
-    W2 = np.random.normal(size=(10, 10)) * np.sqrt(1./20)
+    W1 = np.random.normal(size=(800, 784)) * np.sqrt(1./784)
+    B1 = np.random.normal(size=(800, 1)) * np.sqrt(1./10)
+    W2 = np.random.normal(size=(10, 800)) * np.sqrt(1./20)
     B2 = np.random.normal(size=(10, 1)) * np.sqrt(1./10)
     return W1, B1, W2, B2
 
