@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+#include "NeuralNetwork.h"
+
 #define MNIST_MAGIC 0x00000803
 #define MNIST_NIMAGE 60000
 #define MNIST_ROW 28
@@ -173,6 +175,17 @@ int main(int argc, char **argv){
     display_mnist_image(images);
     unsigned char* labels = load_mnist_labels(labels_file);
     printf("Label: %i \n", labels[0]);
+
+    int* num_images = (int*)malloc(sizeof(int));
+    *num_images = MNIST_NIMAGE;
+
+    int* num_rows = (int*)malloc(sizeof(int));
+    *num_rows = MNIST_ROW;
+
+    int* num_cols = (int*)malloc(sizeof(int));
+    *num_cols = MNIST_Col;
+
+    NeuralNetwork(images, num_images, num_rows, num_cols);
 
     free(images);
     free(labels);
