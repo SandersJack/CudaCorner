@@ -12,7 +12,7 @@
 # A2 = softMax(Z2) (prob)
 
 ### BackProp ###
-# dZ2 [10 x m] = A2 [10 x m] - Labels [10 x m]
+# dZ2 [10 x m] = 2 * (A2 [10 x m] - Labels [10 x m])
 # dW2 = 1/m . dZ2 . A1T [m x 10]
 # dB2 = 1/m . sum(dZ2) [10 x 1]
 # dZ1 = W2T [10 x 10] . dZ2 . g' [10 x m]
@@ -51,8 +51,6 @@ train_label = load_mnist_labels("../data/train-labels.idx1-ubyte")
 print(train_images.shape)
 print(train_label.shape)
 
-print(train_images[0])
-
 ### Split data ###
 m , n = train_images.shape
 
@@ -69,17 +67,19 @@ print(X_train)
 ## NN
 
 def init_params():
-    W1 = np.random.rand(10, 784) - 0.5
-    B1 = np.random.rand(10, 1) - 0.5
-    W2 = np.random.rand(10, 10) - 0.5
-    B2 = np.random.rand(10, 1) - 0.5
+    W1 = np.random.normal(size=(800, 784)) * np.sqrt(1./784)
+    B1 = np.random.normal(size=(800, 1)) * np.sqrt(1./10)
+    W2 = np.random.normal(size=(10, 800)) * np.sqrt(1./20)
+    B2 = np.random.normal(size=(10, 1)) * np.sqrt(1./10)
     return W1, B1, W2, B2
 
 def ReLU(Z):
     return np.maximum(Z, 0)
 
 def SoftMax(Z):
-    return np.exp(Z) / np.sum(np.exp(Z))
+    Z -= np.max(Z, axis=0)  # Subtract max value for numerical stability
+    A = np.exp(Z) / np.sum(np.exp(Z), axis=0)
+    return A
 
 def deriv_ReLU(Z):
     return Z > 0
@@ -98,9 +98,8 @@ def forwardProp(X, W1, B1, W2, B2):
 
     return Z1, A1, Z2, A2
 
-def backProp(Z1, A1, Z2, A2, W2, X, Y):
-    one_hot_Y = OneHot(Y)
-    dZ2 = A2 - one_hot_Y
+def backProp(Z1, A1, Z2, A2, W2, X, one_hot_Y):
+    dZ2 = 2 * (A2 - one_hot_Y)
 
     dW2 = 1 / m * dZ2.dot(A1.T)
     dB2 = 1 / m * np.sum(dZ2)
@@ -128,11 +127,14 @@ def getAccuracy(predictions, Y):
 
 def gradientDecent(X, Y , iterations, learnRate):
     W1, B1, W2, B2 = init_params()
+    
+    one_hot_Y = OneHot(Y_train)
     for i in range(iterations):
         Z1, A1, Z2, A2 = forwardProp(X, W1, B1, W2, B2)
-        dW1, dB1, dW2, dB2 = backProp(Z1, A1, Z2, A2, W2, X, Y)
+        dW1, dB1, dW2, dB2 = backProp(Z1, A1, Z2, A2, W2, X, one_hot_Y)
         W1, B1, W2, B2 = updateParams(W1, B1, W2, B2, dW1, dB1, dW2, dB2, learnRate)
-        if i % 50 == 0:
+
+        if i % 10 == 0:
             print("Iteration: ", i)
             print("Accuracy: ", getAccuracy(getPrediction(A2), Y))
 
