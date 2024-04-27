@@ -51,6 +51,8 @@ train_label = load_mnist_labels("../data/train-labels.idx1-ubyte")
 print(train_images.shape)
 print(train_label.shape)
 
+print(train_images[0])
+
 ### Split data ###
 m , n = train_images.shape
 
@@ -97,7 +99,6 @@ def forwardProp(X, W1, B1, W2, B2):
     return Z1, A1, Z2, A2
 
 def backProp(Z1, A1, Z2, A2, W2, X, Y):
-    #m = Y.size
     one_hot_Y = OneHot(Y)
     dZ2 = A2 - one_hot_Y
 
@@ -131,7 +132,6 @@ def gradientDecent(X, Y , iterations, learnRate):
         Z1, A1, Z2, A2 = forwardProp(X, W1, B1, W2, B2)
         dW1, dB1, dW2, dB2 = backProp(Z1, A1, Z2, A2, W2, X, Y)
         W1, B1, W2, B2 = updateParams(W1, B1, W2, B2, dW1, dB1, dW2, dB2, learnRate)
-
         if i % 50 == 0:
             print("Iteration: ", i)
             print("Accuracy: ", getAccuracy(getPrediction(A2), Y))
