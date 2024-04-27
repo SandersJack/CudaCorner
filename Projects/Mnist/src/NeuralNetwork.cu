@@ -1,13 +1,63 @@
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <stdio.h>
+#include <math.h>
 
 extern "C" {
     #include "NeuralNetwork.h"
 }
 
-__global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, int *num_images, int *num_rows, int *num_cols){
+__global__ void sumExp(float *Z2, float *sum_exp){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int A_x_dim = 60000;
+    int A_y_dim = 784;
+
+    int Z_x_dim = 10;
+    int Z_y_dim = A_x_dim;
+
+    if(idx < Z_x_dim*Z_y_dim){
+        atomicAdd(sum_exp, exp(Z2[idx]));
+    }
+}
+
+__global__ void softMax(float *Z2, float *A2, float *sum_exp){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int A_x_dim = 60000;
+    int A_y_dim = 784;
+
+    int Z_x_dim = 10;
+    int Z_y_dim = A_x_dim;
+
+    if(idx < Z_x_dim*Z_y_dim){
+        A2[idx] = exp(Z2[idx]) / *sum_exp;
+    }
+}
+
+__global__ void reLU(float *Z1, float *A1){
+    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+
+    int A_x_dim = 60000;
+    int A_y_dim = 784;
+
+    int W_x_dim = 10;
+    int W_y_dim = A_y_dim;
+
+    int Z_x_dim = W_x_dim;
+    int Z_y_dim = A_x_dim;
+
+    if(idx < Z_x_dim * Z_y_dim){
+        if(Z1[idx] > 0){
+            A1[idx] = Z1[idx];
+        } else {
+            A1[idx] = 0;
+        }
+    }
+}
+
+__global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, int *num_images, int *num_rows, int *num_cols){
+    int idx = blockIdx.x + blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     int A_x_dim = 60000;
@@ -17,7 +67,7 @@ __global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, 
     int W_y_dim = A_y_dim;
 
     int Z_x_dim = A_x_dim;
-    int Z_y_dim = W_y_dim;
+    int Z_y_dim = W_x_dim;
 
     float Z_value = 0;
 
@@ -31,7 +81,7 @@ __global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, 
 }
 
 __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x + blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     int A_x_dim = 60000;
@@ -57,7 +107,7 @@ __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params
 }
 
 __global__ void linearUpdateBias(float *dZ, ParametersLinear *params){
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx = blockIdx.x + blockDim.x + threadIdx.x;
     
     int dZ_x_dim = 10;
     int dZ_y_dim = 60000;
@@ -74,7 +124,7 @@ __global__ void linearUpdateBias(float *dZ, ParametersLinear *params){
 void ForwardProp(float *d_A, ParametersLinear *d_params, int *d_numImages, int *d_numRows, int *d_numCols, int *h_numImages, int *h_numRows, int *h_numCols){
     float *d_Z;
     // Z (A.x, W.y)
-    cudaMalloc((void**)&d_Z, *h_numImages * *h_numRows * *h_numCols * sizeof(float));
+    cudaMalloc((void**)&d_Z, *h_numImages * 10 * sizeof(float));
 
     cudaError_t cudaError;
 
