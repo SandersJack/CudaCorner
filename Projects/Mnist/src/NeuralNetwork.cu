@@ -77,29 +77,21 @@ __global__ void reLUForward(float *Z1, float *A1){
     }
 }
 
-__global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, int *num_images, int *num_rows, int *num_cols){
+__global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, int *num_images, int *num_rows, int *num_cols,
+    int Z_x_dim, int Z_y_dim, int W_x_dim, int W_y_dim){
     int idx = blockIdx.x + blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
-
-    int A_x_dim = 60000;
-    int A_y_dim = 784;
-
-    int W_x_dim = 10;
-    int W_y_dim = A_y_dim;
-
-    int Z_x_dim = A_x_dim;
-    int Z_y_dim = W_x_dim;
 
     float Z_value = 0;
 
     float *W = params->W;
     float *B = params->B; 
 
-    //float val = params->W[0];
+    float val = params->W[0];
 
     if(idx < Z_x_dim && idy < Z_y_dim){
         for(int t=0; t< W_y_dim; t++){
-            Z_value += A[idx*A_y_dim + t] * params->W[t * W_y_dim + idx] + params->B[idy];
+            Z_value += A[idx*Z_x_dim + t] * params->W[idy * W_y_dim + t] + params->B[idy];
         }
         
         Z[idx * Z_y_dim + idy] = Z_value;
@@ -205,7 +197,8 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
         int batchMatrixSize = (endIdx - startIdx) * 784;
 
         /// First Linear Layer
-        linearForwardProp<<<num_of_blocks, block_size>>>(d_X + startIdx * 784, d_Z1 + startIdx * 784, d_params1, d_numImages, d_numRows, d_numCols);
+        linearForwardProp<<<num_of_blocks, block_size>>>(d_X + startIdx * 784, d_Z1 + startIdx * 784, d_params1, d_numImages, d_numRows, d_numCols,
+            batchSize, 10, 10 , 784);
         cudaDeviceSynchronize();
         printf("Lin1 Done \n");
         cudaError = cudaGetLastError();
@@ -225,7 +218,8 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
             exit(0);
         }
         /// Second Linear Layer
-        linearForwardProp<<<num_of_blocks, block_size>>>(d_A1 + startIdx * 784, d_Z2 + startIdx * 784, d_params2, d_numImages, d_numRows, d_numCols);
+        linearForwardProp<<<num_of_blocks, block_size>>>(d_A1 + startIdx * 784, d_Z2 + startIdx * 784, d_params2, d_numImages, d_numRows, d_numCols, 
+            batchSize, 10, 10, 10);
         cudaDeviceSynchronize();
 
         cudaError = cudaGetLastError();
@@ -291,7 +285,7 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     
     
     float* d_W2;
-    cudaMalloc((void**)&d_W1, 10 * 10 * sizeof(float));
+    cudaMalloc((void**)&d_W2, 10 * 10 * sizeof(float));
     cudaMemcpy(&(d_params2->W), &d_W2, sizeof(float*), cudaMemcpyHostToDevice);
     float* d_B2;
     cudaMalloc((void**)&d_B2, 10 * 1 * sizeof(float));
