@@ -21,14 +21,9 @@ __global__ void sumExp(float *Z2, float *sum_exp){
     }
 }
 
-__global__ void softMax(float *Z2, float *A2, float *sum_exp){
+__global__ void softMax(float *Z2, float *A2, float *sum_exp, 
+    int Z_x_dim, int Z_y_dim){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    int A_x_dim = 60000;
-    int A_y_dim = 784;
-
-    int Z_x_dim = 10;
-    int Z_y_dim = A_x_dim;
 
     if(idx < Z_x_dim*Z_y_dim){
         A2[idx] = exp(Z2[idx]) / *sum_exp;
@@ -56,23 +51,14 @@ __global__ void reLUBack(float* Z1, float* dA1, float* dZ) {
     }
 }
 
-__global__ void reLUForward(float *Z1, float *A1){
+__global__ void reLUForward(float *Z1, float *A1, int Z_x_dim, int Z_y_dim){
     int idx = blockIdx.x + blockDim.x + threadIdx.x;
-
-    int A_x_dim = 60000;
-    int A_y_dim = 784;
-
-    int W_x_dim = 10;
-    int W_y_dim = A_y_dim;
-
-    int Z_x_dim = W_x_dim;
-    int Z_y_dim = A_x_dim;
 
     if(idx < Z_x_dim * Z_y_dim){
         if(Z1[idx] > 0){
-            A1[idx] = Z1[idx];
+            //A1[idx] = Z1[idx];
         } else {
-            A1[idx] = 0;
+            A1[0] = 0;
         }
     }
 }
@@ -175,7 +161,7 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
 
     int batchSize = 1000;
 
-    int numBatches = (*h_numImages + batchSize - 1) / batchSize;
+    int numBatches = (*h_numImages) / batchSize;
 
     int batcharraysize = batchSize * 784;
 
@@ -189,6 +175,7 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
     printf("Num Threads %i \n", singleDimnumBlocks);
 
     for (int i = 0; i < numBatches; i++) {
+        printf("Batch %i Start \n", i);
         // Calculate the start and end indices for this batch
         int startIdx = i * batchSize;
         int endIdx = min(startIdx + batchSize, *h_numImages);
@@ -197,10 +184,9 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
         int batchMatrixSize = (endIdx - startIdx) * 784;
 
         /// First Linear Layer
-        linearForwardProp<<<num_of_blocks, block_size>>>(d_X + startIdx * 784, d_Z1 + startIdx * 784, d_params1, d_numImages, d_numRows, d_numCols,
+        linearForwardProp<<<num_of_blocks, block_size>>>(d_X + startIdx * 784, d_Z1 + startIdx * 10, d_params1, d_numImages, d_numRows, d_numCols,
             batchSize, 10, 10 , 784);
         cudaDeviceSynchronize();
-        printf("Lin1 Done \n");
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (linearForwardProp1): %s\n", cudaGetErrorString(cudaError));
@@ -208,7 +194,7 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
             exit(0);
         }
         /// Relu Layer
-        reLUForward<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z1 + startIdx * 784, d_A1 + startIdx * 784);
+        reLUForward<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z1 + startIdx * 10, d_A1 + startIdx * 10, batchSize, 10);
         cudaDeviceSynchronize();
 
         cudaError = cudaGetLastError();
@@ -218,7 +204,7 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
             exit(0);
         }
         /// Second Linear Layer
-        linearForwardProp<<<num_of_blocks, block_size>>>(d_A1 + startIdx * 784, d_Z2 + startIdx * 784, d_params2, d_numImages, d_numRows, d_numCols, 
+        linearForwardProp<<<num_of_blocks, block_size>>>(d_A1 + startIdx * 10, d_Z2 + startIdx * 10, d_params2, d_numImages, d_numRows, d_numCols, 
             batchSize, 10, 10, 10);
         cudaDeviceSynchronize();
 
@@ -230,7 +216,7 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
         }
 
         /// Sum the exponetial 
-        sumExp<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z2 + startIdx * 784, d_sum_exp);
+        sumExp<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z2 + startIdx * 10, d_sum_exp);
         cudaDeviceSynchronize();
 
         cudaError = cudaGetLastError();
@@ -240,7 +226,8 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
             exit(0);
         }
         /// Conduct the SoftMax
-        softMax<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z2 + startIdx * 784, d_A2 + startIdx * 784, d_sum_exp);
+        softMax<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z2 + startIdx * 10, d_A2 + startIdx * 10, d_sum_exp, 
+        batchSize, 10);
         cudaDeviceSynchronize();
 
         cudaError = cudaGetLastError();
@@ -300,9 +287,9 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     
     
     /// Init the outputs of the forward steps
-    float *d_Z1; // Z1 (A.x, W.y)
+    float *d_Z1; // Z1
     cudaMalloc((void**)&d_Z1, *h_numImages * 10 * sizeof(float));
-    float *d_A1; // A1 (A.x, W.y)
+    float *d_A1; // A1
     cudaMalloc((void**)&d_A1, *h_numImages * 10 * sizeof(float));
     float *d_Z2; // Z2
     cudaMalloc((void**)&d_Z2, *h_numImages * 10 * sizeof(float));
