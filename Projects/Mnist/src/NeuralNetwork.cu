@@ -35,7 +35,28 @@ __global__ void softMax(float *Z2, float *A2, float *sum_exp){
     }
 }
 
-__global__ void reLU(float *Z1, float *A1){
+__global__ void reLUBack(float* Z1, float* dA1, float* dZ) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int A_x_dim = 60000;
+    int A_y_dim = 784;
+
+    int W_x_dim = 10;
+    int W_y_dim = A_y_dim;
+
+    int Z_x_dim = W_x_dim;
+    int Z_y_dim = A_x_dim;
+
+    if(idx < Z_x_dim * Z_y_dim) {
+        if(Z1[idx] > 0){
+            dA1[idx] *= Z1[idx];
+        } else {
+            dA1[idx] *= 0;
+        }
+    }
+}
+
+__global__ void reLUForward(float *Z1, float *A1){
     int idx = blockIdx.x + blockDim.x + threadIdx.x;
 
     int A_x_dim = 60000;
