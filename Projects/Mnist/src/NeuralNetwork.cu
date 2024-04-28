@@ -80,6 +80,29 @@ __global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, 
     }
 }
 
+__global__ void linearBackProp(float *dZ2, ParametersLinear *params, float *dZ1){
+    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int dA_x_dim = 10;
+    int dA_y_dim = 60000;
+
+    int A_x_dim = 60000;
+    int A_y_dim = 784;
+
+    int W_x_dim = 10;
+    int W_y_dim = A_y_dim;
+
+    float dZ1_value = 0.0f;
+
+    if(idx < dA_x_dim && idy < dA_y_dim){
+        for(int i=0; i<W_y_dim; i++){
+            dZ1_value += params->W[i*W_y_dim + idx] * dZ2[i*W_y_dim + idy];
+        }
+        dZ2[idx*dA_y_dim+idy] = dZ1_value;
+    }
+}
+
 __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params){
     int idx = blockIdx.x + blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
