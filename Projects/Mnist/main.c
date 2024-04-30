@@ -185,7 +185,7 @@ int main(int argc, char **argv){
     int* num_cols = (int*)malloc(sizeof(int));
     *num_cols = MNIST_Col;
 
-    NeuralNetwork(images, num_images, num_rows, num_cols);
+    NeuralNetwork(images, num_images, num_rows, num_cols, labels);
 
     free(images);
     free(labels);
