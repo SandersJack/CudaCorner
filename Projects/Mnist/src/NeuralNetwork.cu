@@ -245,6 +245,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
 
         // Calculate the size of this batch
         int batchMatrixSize = (endIdx - startIdx) * 784;
+        printf("%i \n", startIdx * 10);
 
         startBackProp<<<singleDimblockSize, singleDimnumBlocks10>>>(d_dZ2 + startIdx * 10, d_A2 + startIdx * 10, d_one_hot_Y + startIdx * 10, 60000, 10);
         cudaDeviceSynchronize();
@@ -508,12 +509,23 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
         // Handle error appropriately
         exit(0);
     }
+    float *d_A1_orgininal = d_A1;
+    float *d_A2_orgininal = d_A2;
+    float *d_Z1_orgininal = d_Z1;
+    float *d_Z2_orgininal = d_Z2;
 
+    float *d_data_original = d_data;
     // Testing with one forward prop
     ForwardProp(d_data, d_params1, d_params2, d_numImages, d_numRows, d_numCols, h_numImages, h_numRows, h_numCols,
                 d_Z1, d_A1, d_Z2, d_A2);
 
+    d_A1 = d_A1_orgininal; 
+    d_A2 = d_A2_orgininal; 
+    d_Z1 = d_Z1_orgininal; 
+    d_Z2 = d_Z2_orgininal;
 
+    d_data = d_data_original;
+    
     BackProp(d_Z1, d_A1, d_A2, d_W2, d_params1, d_params2, d_one_hot, d_data, d_dZ2, d_dZ1, h_numImages, h_numRows, h_numCols);
 
     getAccuracy(d_A2, d_labels, d_numImages);
