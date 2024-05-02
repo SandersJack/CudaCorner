@@ -228,12 +228,14 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
     int numBatches = (*h_numImages) / batchSize;
 
     int batcharraysize = batchSize * 784;
+    int batcharraysize10 = batchSize * 10;
 
     dim3 block_size(8,8);
     dim3 num_of_blocks((batchSize+block_size.x-1)/block_size.x,(*h_numRows * *h_numCols+block_size.y-1)/block_size.y);
 
     int singleDimblockSize = 1028;
-    int singleDimnumBlocks = (batcharraysize + singleDimblockSize - 1) / singleDimblockSize;
+    int singleDimnumBlocks784 = (batcharraysize + singleDimblockSize - 1) / singleDimblockSize;
+    int singleDimnumBlocks10 = (batcharraysize10 + singleDimblockSize - 1) / singleDimblockSize;
 
     for (int i = 0; i < numBatches; i++) {
         printf("Batch %i Start \n", i);
@@ -244,7 +246,8 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
         // Calculate the size of this batch
         int batchMatrixSize = (endIdx - startIdx) * 784;
 
-        startBackProp<<<singleDimblockSize, singleDimnumBlocks>>>(d_dZ2 + startIdx * 10, d_A2 + startIdx * 10, d_one_hot_Y, 60000, 10);
+        startBackProp<<<singleDimblockSize, singleDimnumBlocks10>>>(d_dZ2 + startIdx * 10, d_A2 + startIdx * 10, d_one_hot_Y + startIdx * 10, 60000, 10);
+        cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (startBackProp): %s\n", cudaGetErrorString(cudaError));
@@ -253,6 +256,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
         }
 
         linearBackProp<<<num_of_blocks, block_size>>>(d_dZ2 + startIdx * 784, d_dZ1 + startIdx * 10, d_params2, 60000, 10, 10);
+        cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (linearBackProp): %s\n", cudaGetErrorString(cudaError));
@@ -260,7 +264,8 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
             exit(0);
         }
         
-        reLUBack<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z1 + startIdx * 784, d_dZ1 + startIdx * 10, 60000, 10);
+        reLUBack<<<singleDimblockSize, singleDimnumBlocks784>>>(d_Z1 + startIdx * 784, d_dZ1 + startIdx * 10, 60000, 10);
+        cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (reLUBack): %s\n", cudaGetErrorString(cudaError));
@@ -268,14 +273,16 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
             exit(0);
         }
         // Linear 2
-        linearUpdateWeight<<<num_of_blocks, block_size>>>(d_A1 + startIdx * 784, d_dZ2 + startIdx * 10, d_params2, 10, 10, 60000, 10, 60000);
+        linearUpdateWeight<<<num_of_blocks, singleDimnumBlocks784>>>(d_A1 + startIdx * 784, d_dZ2 + startIdx * 10, d_params2, 10, 10, 60000, 10, 60000);
+        cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (linearUpdateWeight2): %s\n", cudaGetErrorString(cudaError));
             // Handle error appropriately
             exit(0);
         }
-        linearUpdateBias<<<singleDimblockSize, singleDimnumBlocks>>>(d_dZ2 + startIdx * 784, d_params2, 60000, 10);
+        linearUpdateBias<<<singleDimblockSize, singleDimnumBlocks784>>>(d_dZ2 + startIdx * 784, d_params2, 60000, 10);
+        cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (linearUpdateWeight2): %s\n", cudaGetErrorString(cudaError));
@@ -284,13 +291,15 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
         }
         // Linear 1        
         linearUpdateWeight<<<num_of_blocks, block_size>>>(d_data + startIdx * 784, d_dZ1 + startIdx * 10, d_params1, 784, 10, 784, 10, 60000);
+        cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (linearUpdateWeight2): %s\n", cudaGetErrorString(cudaError));
             // Handle error appropriately
             exit(0);
         }
-        linearUpdateBias<<<singleDimblockSize, singleDimnumBlocks>>>(d_dZ1 + startIdx * 784, d_params2, 60000, 10);
+        linearUpdateBias<<<singleDimblockSize, singleDimnumBlocks784>>>(d_dZ1 + startIdx * 784, d_params2, 60000, 10);
+        cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (linearUpdateWeight2): %s\n", cudaGetErrorString(cudaError));
@@ -344,6 +353,64 @@ __global__ void initParams(ParametersLinear *params1, ParametersLinear *params2)
     }
 }
 
+__global__ void getPrediction(float *A2, int Z_x_dim, int Z_y_dim, int *predictions) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < Z_x_dim) {
+        float max_val = A2[idx];
+        int max_idx = idx;
+        for (int i = idx * Z_y_dim; i < Z_x_dim * Z_y_dim; i++) {
+            if (A2[i] > max_val) {
+                max_val = A2[i];
+                max_idx = idx;
+            }
+        }
+        predictions[max_idx / 10] = max_idx % Z_y_dim;
+    }
+}
+
+__global__ void _getAccuracy(int *predictions, unsigned char *Y, int numLabels, float *accuracy) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < numLabels) {
+        *accuracy += (predictions[idx] == Y[idx]) ? 1.0f : 0.0f;
+    }
+}
+
+void getAccuracy(float *d_A2, unsigned char *d_labels, int *d_numImages){
+    float *d_accuracy;
+    int *d_predictions;
+    cudaError_t err;
+    printf("Start Acc \n");
+    cudaMalloc((void **)&d_accuracy, sizeof(float));
+    cudaMalloc((void **)&d_predictions, 60000 * sizeof(int));
+
+    printf("Start 1 \n");
+    int numThreads = 512;
+    int numBlocks = (10 + numThreads - 1) / numThreads;
+    cudaError_t cudaError;
+    printf("Start 2 \n");
+    getPrediction<<<numBlocks, numThreads>>>(d_A2, *d_numImages, 10, d_predictions);
+    cudaDeviceSynchronize();
+    cudaError = cudaGetLastError();
+    if (cudaError != cudaSuccess) {
+        printf("Kernel launch error (getPrediction): %s\n", cudaGetErrorString(cudaError));
+        exit(0);
+    }
+    printf("Start 3 \n");
+    _getAccuracy<<<numBlocks, numThreads>>>(d_predictions, d_labels, *d_numImages, d_accuracy);
+    cudaDeviceSynchronize();
+    cudaError = cudaGetLastError();
+    if (cudaError != cudaSuccess) {
+        printf("Kernel launch error (_getAccuracy): %s\n", cudaGetErrorString(cudaError));
+        // Handle error appropriately
+        exit(0);
+    }
+
+    float *h_accuracy = (float*)malloc(sizeof(float));
+    cudaMemcpy(h_accuracy, d_accuracy, sizeof(float), cudaMemcpyDeviceToHost);
+
+    printf("Accuracy: %f \n", *h_accuracy / 60000);
+}
+
 void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCols, unsigned char *h_labels){
 
     printf("Init Params \n");
@@ -385,6 +452,7 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     /// Init the device weights
 
     initParams<<<1, 1>>>(d_params1, d_params2);
+    cudaDeviceSynchronize();
     cudaError = cudaGetLastError();
     if (cudaError != cudaSuccess) {
         printf("Kernel launch error (initParams): %s\n", cudaGetErrorString(cudaError));
@@ -422,15 +490,18 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     int numLabels = 60000;
     int numClasses = 10; 
 
-    cudaMalloc((void**)&d_labels, numLabels * sizeof(unsigned char*));
-    cudaMalloc((void**)&d_one_hot, numLabels * numClasses * sizeof(unsigned char*));
 
-    cudaMalloc((void**)&d_labels, numLabels* sizeof(unsigned char*));
+    cudaMalloc((void**)&d_one_hot, numLabels * numClasses * sizeof(unsigned char));
+
+    cudaMalloc((void**)&d_labels, numLabels * sizeof(unsigned char));
+    cudaMemcpy(d_labels, h_labels, numLabels * sizeof(unsigned char), cudaMemcpyHostToDevice);
+
 
     int numThreads = 512;
     int numBlocks = (numLabels + numThreads - 1) / numThreads;
     
     one_hot_encode<<<numBlocks, numThreads>>>(d_labels, d_one_hot, numLabels, numClasses);
+    cudaDeviceSynchronize();
     cudaError = cudaGetLastError();
     if (cudaError != cudaSuccess) {
         printf("Kernel launch error (one_hot_encode): %s\n", cudaGetErrorString(cudaError));
@@ -444,4 +515,6 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
 
 
     BackProp(d_Z1, d_A1, d_A2, d_W2, d_params1, d_params2, d_one_hot, d_data, d_dZ2, d_dZ1, h_numImages, h_numRows, h_numCols);
+
+    getAccuracy(d_A2, d_labels, d_numImages);
 }

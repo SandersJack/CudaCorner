@@ -17,4 +17,6 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
 void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLinear *d_params2, unsigned char *d_one_hot_Y, 
     float *d_data, float* d_dZ2, float *d_dZ1);
 
+void getAccuracy(float *d_A2, float *d_labels, int *d_numImages);
+
 #endif
