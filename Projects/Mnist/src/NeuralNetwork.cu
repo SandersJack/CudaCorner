@@ -317,6 +317,33 @@ __global__ void one_hot_encode(unsigned char* labels, unsigned char* output, int
     }
 }
 
+__device__ float getRandomNumber(curandState_t globalState) {
+    float random = curand_uniform(&globalState) - 0.5f;
+    return random;
+}
+
+__global__ void initParams(ParametersLinear *params1, ParametersLinear *params2){
+    curandState_t globalState;
+    curand_init(clock64(), 10, 0, &globalState);
+
+    for(int i=0; i<10; i++){
+        for(int j=0; j<784; j++){
+            params1->W[i*784 + j] = getRandomNumber(globalState) / sqrtf(1/784);
+        }
+    }
+    for(int i=0; i<10; i++){
+        params2->B[i] = getRandomNumber(globalState) / sqrtf(1/10);
+    }
+    for(int i=0; i<10; i++){
+        for(int j=0; j<10; j++){
+            params2->W[i*10 + j] = getRandomNumber(globalState) / sqrtf(1/20);
+        }
+    }
+    for(int i=0; i<10; i++){
+        params2->B[i] = getRandomNumber(globalState) / sqrtf(1/10);
+    }
+}
+
 void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCols, unsigned char *h_labels){
 
     printf("Init Params \n");
@@ -353,6 +380,18 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     float* d_B2;
     cudaMalloc((void**)&d_B2, 10 * 1 * sizeof(float));
     cudaMemcpy(&(d_params2->B), &d_B2, sizeof(float*), cudaMemcpyHostToDevice);
+
+    cudaError_t cudaError;
+    /// Init the device weights
+
+    initParams<<<1, 1>>>(d_params1, d_params2);
+    cudaError = cudaGetLastError();
+    if (cudaError != cudaSuccess) {
+        printf("Kernel launch error (initParams): %s\n", cudaGetErrorString(cudaError));
+        // Handle error appropriately
+        exit(0);
+    }
+
     
     ///
     
@@ -390,7 +429,7 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
 
     int numThreads = 512;
     int numBlocks = (numLabels + numThreads - 1) / numThreads;
-    cudaError_t cudaError;
+    
     one_hot_encode<<<numBlocks, numThreads>>>(d_labels, d_one_hot, numLabels, numClasses);
     cudaError = cudaGetLastError();
     if (cudaError != cudaSuccess) {
