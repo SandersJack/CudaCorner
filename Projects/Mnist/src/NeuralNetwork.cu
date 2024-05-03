@@ -15,6 +15,7 @@ __global__ void sumExp(float *Z2, float *sum_exp){
 
     if(idx < Z_x_dim*Z_y_dim){
         atomicAdd(sum_exp, exp(Z2[idx]));
+        //printf("VAL: %i %f \n",idx,  Z2[idx]);
     }
 }
 
@@ -24,7 +25,6 @@ __global__ void softMax(float *Z2, float *A2, float *sum_exp,
     
     if(idx < Z_x_dim*Z_y_dim){
         A2[idx] = exp(Z2[idx]) * *sum_exp;
-        printf("VAL: %f \n", Z2[idx]);
     }
 }
 
@@ -41,7 +41,7 @@ __global__ void reLUBack(float* Z1, float* dA1, int Z_x_dim, int Z_y_dim) {
 }
 
 __global__ void reLUForward(float *Z1, float *A1, int Z_x_dim, int Z_y_dim){
-    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if(idx < Z_x_dim * Z_y_dim){
         if(Z1[idx] > 0){
@@ -54,27 +54,21 @@ __global__ void reLUForward(float *Z1, float *A1, int Z_x_dim, int Z_y_dim){
 
 __global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, int *num_images, int *num_rows, int *num_cols,
     int Z_x_dim, int Z_y_dim, int W_x_dim, int W_y_dim){
-    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     float Z_value = 0;
-
-    float *W = params->W;
-    float *B = params->B; 
-
-    float val = params->W[0];
-
+    
     if(idx < Z_x_dim && idy < Z_y_dim){
         for(int t=0; t< W_y_dim; t++){
-            Z_value += A[idx*Z_x_dim + t] * params->W[idy * W_y_dim + t] + params->B[idy];
+            Z_value += A[idx*W_y_dim + t] * params->W[idy * W_y_dim + t] + params->B[idy];
         }
-        
-        Z[idx * Z_y_dim + idy] = Z_value;
+        Z[idx * W_x_dim + idy] = Z_value;
     }
 }
 
 __global__ void linearBackProp(float *dZ2, float *dZ1, ParametersLinear *params, int Z_x_dim, int Z_y_dim, int W_y_dim){
-    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     float dZ1_value = 0.0f;
@@ -88,7 +82,7 @@ __global__ void linearBackProp(float *dZ2, float *dZ1, ParametersLinear *params,
 }
 
 __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params, int W_x_dim, int W_y_dim, int A_x_dim, int A_y_dim, int dZ_x_dim){
-    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     float dW_value = 0.0f;
@@ -105,7 +99,7 @@ __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params
 }
 
 __global__ void linearUpdateBias(float *dZ, ParametersLinear *params, int dZ_x_dim, int dZ_y_dim){
-    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     float learning_rate = 0.01;
 
@@ -133,8 +127,10 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
 
     int batcharraysize = batchSize * 784;
 
-    dim3 block_size(8,8);
-    dim3 num_of_blocks((batchSize+block_size.x-1)/block_size.x,(*h_numRows * *h_numCols+block_size.y-1)/block_size.y);
+    dim3 block_size(16,16);
+    dim3 num_of_blocks((batchSize+block_size.x-1)/block_size.x, (*h_numRows * *h_numCols+block_size.y-1)/block_size.y);
+
+    dim3 num_of_blocks2((batchSize+block_size.x-1)/block_size.x, (10+block_size.y-1)/block_size.y);
 
     int singleDimblockSize = 1028;
     int singleDimnumBlocks = (batcharraysize + singleDimblockSize - 1) / singleDimblockSize;
@@ -145,22 +141,16 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
     printf("Num block x threads %i \n", singleDimblockSize * singleDimnumBlocks);
     printf("Num Threads %i \n", singleDimnumBlocks);
 
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < numBatches; i++) {
         printf("Batch %i Start \n", i);
         // Calculate the start and end indices for this batch
         int startIdx = i * batchSize;
         int endIdx = min(startIdx + batchSize, *h_numImages);
-
-        /// Pointer arith
-        d_X += startIdx * 784;
-        d_Z1 += startIdx * 10;
-        d_A1 += startIdx * 10;
-        d_Z2 += startIdx * 10;
-        d_A2 += startIdx * 10;
-
+        // 47040000
+        // 10976000
         // Calculate the size of this batch
         int batchMatrixSize = (endIdx - startIdx) * 784;
-
+        printf("%i \n", startIdx * 784);
         /// First Linear Layer
         linearForwardProp<<<num_of_blocks, block_size>>>(d_X, d_Z1, d_params1, d_numImages, d_numRows, d_numCols,
             batchSize, 10, 10 , 784);
@@ -182,21 +172,20 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
             exit(0);
         }
         /// Second Linear Layer
-        linearForwardProp<<<num_of_blocks, block_size>>>(d_A1, d_Z2, d_params2, d_numImages, d_numRows, d_numCols, 
+        linearForwardProp<<<num_of_blocks2, block_size>>>(d_A1, d_Z2, d_params2, d_numImages, d_numRows, d_numCols, 
             batchSize, 10, 10, 10);
         cudaDeviceSynchronize();
-
+        
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (linearForwardProp2): %s\n", cudaGetErrorString(cudaError));
             // Handle error appropriately
             exit(0);
         }
-
+        
         /// Sum the exponetial 
         sumExp<<<singleDimblockSize, singleDimnumBlocks2>>>(d_Z2, d_sum_exp);
         cudaDeviceSynchronize();
-
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
             printf("Kernel launch error (sumExp): %s\n", cudaGetErrorString(cudaError));
@@ -214,11 +203,18 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
             // Handle error appropriately
             exit(0);
         }
+
+        /// Pointer arith
+        d_X += batchSize * 784;
+        d_Z1 += batchSize * 10;
+        d_A1 += batchSize * 10;
+        d_Z2 += batchSize * 10;
+        d_A2 += batchSize * 10;
     }
 }
 
 __global__ void startBackProp(float *d_Z2, float *d_A2, unsigned char *d_one_hot_Y, int Z_x_dim, int Z_y_dim){
-    int idx = blockIdx.x + blockDim.x + threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if(idx < Z_x_dim * Z_y_dim){
         d_Z2[idx] = 2 * (d_A2[idx] - d_one_hot_Y[idx]);
@@ -250,16 +246,6 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
         // Calculate the start and end indices for this batch
         int startIdx = i * batchSize;
         int endIdx = min(startIdx + batchSize, *h_numImages);
-
-        /// Pointer arith
-        d_dZ2 += startIdx * 10;
-        d_A2 += startIdx * 10;
-        d_one_hot_Y += startIdx * 10;
-        d_dZ1 += startIdx * 10;
-        d_Z1 += startIdx * 10;
-        d_A1 += startIdx * 10;
-        d_dZ2 += startIdx * 10;
-        d_data += startIdx * 784;
 
         // Calculate the size of this batch
         int batchMatrixSize = (endIdx - startIdx) * 784;
@@ -325,11 +311,20 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, float *d_W2, ParametersLine
             // Handle error appropriately
             exit(0);
         }
+
+        /// Pointer arith
+        d_dZ2 += batchSize * 10;
+        d_A2 += batchSize * 10;
+        d_one_hot_Y += batchSize * 10;
+        d_dZ1 += batchSize * 10;
+        d_Z1 += batchSize * 10;
+        d_A1 += batchSize * 10;
+        d_data += batchSize * 784;
     }
 }   
 
 __global__ void one_hot_encode(unsigned char* labels, unsigned char* output, int numLabels, int numClasses) {
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int idx = threadIdx.x * blockIdx.x * blockDim.x;
 
     if (idx < numLabels) {
         // Initialize the output array for this label to zeros
@@ -351,24 +346,32 @@ __device__ float getRandomNumber(curandState_t globalState) {
 }
 
 __global__ void initParams(ParametersLinear *params1, ParametersLinear *params2){
-    curandState_t globalState;
-    curand_init(clock64(), 10, 0, &globalState);
+    
 
     for(int i=0; i<10; i++){
         for(int j=0; j<784; j++){
-            params1->W[i*784 + j] = getRandomNumber(globalState) / sqrtf(1/784);
+            curandState_t globalState;
+            curand_init(clock64() * i*j, 0, 0, &globalState);
+            params1->W[i*784 + j] = getRandomNumber(globalState) / sqrtf(1./784.);
+            //printf("VAL: %i %f \n", i*784 + j, params1->W[i*784 + j]);
         }
     }
     for(int i=0; i<10; i++){
-        params2->B[i] = getRandomNumber(globalState) / sqrtf(1/10);
+        curandState_t globalState;
+        curand_init(clock64() + i, 0, 0, &globalState);
+        params1->B[i] = getRandomNumber(globalState) / sqrtf(1./10.);
     }
     for(int i=0; i<10; i++){
         for(int j=0; j<10; j++){
-            params2->W[i*10 + j] = getRandomNumber(globalState) / sqrtf(1/20);
+            curandState_t globalState;
+            curand_init(clock64(),0 , 0, &globalState);
+            params2->W[i*10 + j] = getRandomNumber(globalState) / sqrtf(1./20.);
         }
     }
     for(int i=0; i<10; i++){
-        params2->B[i] = getRandomNumber(globalState) / sqrtf(1/10);
+        curandState_t globalState;
+        curand_init(clock64()*i, 0, 0, &globalState);
+        params2->B[i] = getRandomNumber(globalState) / sqrtf(1./10);
     }
 }
 
@@ -440,7 +443,6 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     float *d_data;
     int *d_numImages, *d_numRows, *d_numCols;
     ParametersLinear *d_params1, *d_params2;
-
     cudaMalloc((void**)&d_data, *h_numImages* *h_numRows * *h_numCols * sizeof(float));
 
     cudaMalloc((void**)&d_numImages, sizeof(int));
@@ -478,7 +480,6 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
         // Handle error appropriately
         exit(0);
     }
-
     
     ///
     
@@ -499,9 +500,9 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     cudaMalloc((void**)&d_A2, *h_numImages * 10 * sizeof(float));
 
     float *d_dZ1; // Z1
-    cudaMalloc((void**)&d_Z1, *h_numImages * 10 * sizeof(float));
+    cudaMalloc((void**)&d_dZ1, *h_numImages * 10 * sizeof(float));
     float *d_dZ2; // Z2
-    cudaMalloc((void**)&d_Z2, *h_numImages * 10 * sizeof(float));
+    cudaMalloc((void**)&d_dZ2, *h_numImages * 10 * sizeof(float));
 
     unsigned char *d_labels;
     unsigned char *d_one_hot;
