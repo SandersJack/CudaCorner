@@ -35,7 +35,6 @@ __global__ void sumExp(float *Z2, float *sum_exp, float *maxZ, int Z_x_dim, int 
         //printf("MaxZ %f \n", maxZ[idx]);
         for(int i=0; i<Z_y_dim; i++){
             Z2[idx*Z_y_dim + i] -= maxZ[idx];
-            
             sum_val += exp(Z2[idx*Z_y_dim + i]);
             //if(idx == 550)
             //    printf(" sumExp %f %f %f \n", Z2[idx*Z_y_dim + i], exp(Z2[idx*Z_y_dim + i]), maxZ[idx]);
@@ -88,9 +87,10 @@ __global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, 
     float Z_value = 0;
     
     if(idx < Z_x_dim && idy < Z_y_dim){
-        for(int t=0; t< W_x_dim; t++){
-            int W_idx = idy * W_x_dim + t;
-            int A_idx = t * Z_y_dim + idy;            
+        for(int t=0; t< W_y_dim; t++){
+            /// This is correct
+            int W_idx = idx * W_y_dim + t; // W 10 x 784
+            int A_idx = idy * Z_y_dim + t; // A 1000 x 784
             Z_value += params->W[W_idx] * A[A_idx];
 
             if(printout && A[A_idx] != 0)
@@ -109,30 +109,30 @@ __global__ void linearBackProp(float *dZ2, float *dZ1, ParametersLinear *params,
     float dZ1_value = 0.0f;
 
     if(idx < Z_x_dim && idy < Z_y_dim){
-        for(int i=0; i<W_y_dim; i++){
-            int W_idx = idy * W_y_dim + i;
-            int dZ2_idx = idx * W_y_dim + i; 
+        for(int i=0; i<10; i++){
+            int W_idx = idx * W_y_dim + i; // W.T 10 x 10
+            int dZ2_idx = idy * W_y_dim + i; // dZ2 1000 x 10
 
             dZ1_value += params->W[W_idx] * dZ2[dZ2_idx];
         }
-        dZ1[idx*Z_y_dim+idy] = dZ1_value;
+        dZ1[idx*Z_y_dim+idy] = dZ1_value; // 10 x 1000
         //if(idx == 10)
-        //    printf("linear back dz %f \n" ,dZ1[idx*Z_y_dim+idy]);
+        //printf("linear back %i %i \n" ,Z_x_dim, Z_y_dim);
     }
 }
 
-__global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params, int W_x_dim, int W_y_dim, int A_x_dim, int A_y_dim, int dZ_x_dim){
+__global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params, int W_x_dim, int W_y_dim, int A_x_dim, int A_y_dim, int dZ_x_dim, int dZ_y_dim){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idy = blockIdx.y * blockDim.y + threadIdx.y;
 
     float dW_value = 0.0f;
 
-    float learning_rate = 0.01;
+    float learning_rate = 0.1;
 
     if(idx < W_x_dim && idy < W_y_dim){
-        for(int i=0; i<A_x_dim; i++){
-            int dZ_idx = i * W_y_dim + idy; // W.T 10 x 1000
-            int A_idx = i * A_y_dim + idy; // 10 x 1000
+        for(int i=0; i<dZ_x_dim; i++){
+            int dZ_idx = i * dZ_y_dim + idx ; // Dz eg dz1 10 x 1000 
+            int A_idx = i * A_y_dim + idy; // A.T eg X 1000 x 784
 
             dW_value += dZ[dZ_idx] * A[A_idx];
         }
@@ -298,6 +298,8 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
     dim3 block_size(16,16);
     dim3 num_of_blocks((batchSize+block_size.x-1)/block_size.x,(*h_numRows * *h_numCols+block_size.y-1)/block_size.y);
 
+    dim3 num_of_blocks_back((10 + block_size.x-1)/block_size.x,(batchSize+block_size.y-1)/block_size.y);
+
     int singleDimblockSize = 1028;
     int singleDimnumBlocks784 = (batcharraysize + singleDimblockSize - 1) / singleDimblockSize;
     int singleDimnumBlocks10 = (batcharraysize10 + singleDimblockSize - 1) / singleDimblockSize;
@@ -329,7 +331,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
             // Handle error appropriately
             exit(0);
         }
-        linearBackProp<<<num_of_blocks, block_size>>>(d_dZ2, d_dZ1, d_params2, batchSize, 10, 10);
+        linearBackProp<<<num_of_blocks_back, block_size>>>(d_dZ2, d_dZ1, d_params2, 10, batchSize, batchSize);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
@@ -346,7 +348,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
             exit(0);
         }
         // Linear 2
-        linearUpdateWeight<<<num_of_blocks, singleDimnumBlocks10>>>(d_A1, d_dZ2, d_params2, 10, 10, batchSize, 10, batchSize);
+        linearUpdateWeight<<<num_of_blocks, singleDimnumBlocks10>>>(d_A1, d_dZ2, d_params2, 10, 10, batchSize, 10, 10, batchSize);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
@@ -364,7 +366,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
             exit(0);
         }
         // Linear 1        
-        linearUpdateWeight<<<num_of_blocks, block_size>>>(d_data, d_dZ1, d_params1, 784, 10, 784, 10, batchSize);
+        linearUpdateWeight<<<num_of_blocks, block_size>>>(d_data, d_dZ1, d_params1, 784, 10, 784, 10, 10, batchSize);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
@@ -626,7 +628,7 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
 
     float *d_data_original = d_data;
 
-    int iter = 50;
+    int iter = 100;
     for(int i=0; i < iter; i++){
         printf("Iteration: %i \n", i);
         ForwardProp(d_data, d_params1, d_params2, d_numRows, d_numCols, h_numImages, h_numRows, h_numCols,
