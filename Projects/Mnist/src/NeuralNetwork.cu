@@ -11,12 +11,14 @@ __global__ void findMax(float* Z, float* maxZ, int Z_x_dim, int Z_y_dim) {
     int idx =  blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx < Z_x_dim) {
-        float max_val = 0;
+        float max_val = 1;
         for (int i = 1; i < Z_y_dim; i++) {
-            float val = Z[i * Z_y_dim + idx];
+            float val = Z[idx * Z_y_dim + i];
             if (val > max_val) {
                 max_val = val;
             }
+            if(idx == 550)
+                printf("maxVals %i %f \n", i, Z[idx * Z_y_dim + i]);
         }
         maxZ[idx] = max_val;
     }
@@ -32,6 +34,8 @@ __global__ void sumExp(float *Z2, float *sum_exp, float *maxZ, int Z_x_dim, int 
         for(int i=0; i<Z_y_dim; i++){
             Z2[idx*Z_y_dim + i] -= maxZ[idx];
             sum_val += exp(Z2[idx*Z_y_dim + i]);
+            if(idx == 550)
+                printf(" sumExp %f %f %f \n", Z2[idx*Z_y_dim + i], exp(Z2[idx*Z_y_dim + i]), maxZ[idx]);
         }
         sum_exp[idx] = sum_val;
     }
@@ -43,7 +47,8 @@ __global__ void softMax(float *Z2, float *A2, float *sum_exp,
     
     if(idx < Z_x_dim){
         for(int i=0; i<Z_y_dim; i++){
-            A2[idx * Z_y_dim + i] = exp(Z2[idx * Z_y_dim + i]) / sum_exp[idx];
+            if(sum_exp[idx] != 0)
+                A2[idx * Z_y_dim + i] = exp(Z2[idx * Z_y_dim + i]) / sum_exp[idx];
         }
     }
 }
@@ -80,16 +85,19 @@ __global__ void linearForwardProp(float* A, float* Z, ParametersLinear *params, 
     float Z_value = 0;
     
     if(idx < Z_x_dim && idy < Z_y_dim){
-        for(int t=0; t< W_y_dim; t++){
-            int A_idx = idx * Z_y_dim + t;
-            int W_idx = idy * W_y_dim + t;
-            Z_value += A[A_idx] * params->W[W_idx];
+        for(int t=0; t< 784; t++){
+            int W_idx = idy * W_y_dim + t; // 784 x 10 then 10 x 10
+            int A_idx = idx * Z_y_dim + t; // 784 x 1000 then 10 x 1000
+            
+
+            Z_value += params->W[W_idx] * A[A_idx];
+
             if(printout && A[A_idx] != 0)
                 printf("%i %i Z: %f %f \n",A_idx, W_idx,  A[A_idx] , params->W[W_idx]);
         }
         Z[idx * Z_y_dim + idy] = Z_value + params->B[idy];
-        if(printout)
-            printf("Z: %i %f \n", idx * Z_y_dim + idy, Z[idx * Z_y_dim + idy]);
+        if(idx == 750)
+            printf("Linear F Z: %i %f \n", idx * Z_y_dim + idy, Z[idx * Z_y_dim + idy]);
     }
 }
 
@@ -100,10 +108,15 @@ __global__ void linearBackProp(float *dZ2, float *dZ1, ParametersLinear *params,
     float dZ1_value = 0.0f;
 
     if(idx < Z_x_dim && idy < Z_y_dim){
-        for(int i=0; i<W_y_dim; i++){
-            dZ1_value +=  dZ2[i*Z_y_dim + idx] * params->W[i*W_y_dim + idy];
+        for(int i=0; i<10; i++){
+            int W_idx = i * 10 + idy; // W.T 10 x 10
+            int dZ2_idx = idx * 1000 + i; // 10 x 1000
+
+            dZ1_value += params->W[W_idx] * dZ2[dZ2_idx];
         }
         dZ1[idx*Z_y_dim+idy] = dZ1_value;
+        if(idx == 10)
+            printf("linear back dz %f \n" ,dZ1[idx*Z_y_dim+idy]);
     }
 }
 
@@ -116,12 +129,16 @@ __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params
     float learning_rate = 0.01;
 
     if(idx < W_x_dim && idy < W_y_dim){
-        for(int i=0; i<dZ_x_dim; i++){
-            dW_value += dZ[idx*W_y_dim + i] * A[idy * A_y_dim + i];
+        for(int i=0; i<10; i++){
+            int dZ_idx = i * 10 + idy; // W.T 10 x 1000
+            int A_idx = i * 1000 + idy; // 10 x 1000
+
+            dW_value += dZ[dZ_idx] * A[A_idx];
         }
 
         params->W[idx * W_y_dim + idy] = params->W[idx * W_y_dim + idy] - learning_rate * dW_value/A_x_dim;
-        //printf("W: %i %f \n", idx * W_y_dim + idy, params->W[idx * W_y_dim + idy]);
+        if(idx == 5)
+            printf("update weights W: %i %f \n", idx * W_y_dim + idy, params->W[idx * W_y_dim + idy]);
     }
 }
 
@@ -133,8 +150,11 @@ __global__ void linearUpdateBias(float *dZ, ParametersLinear *params, int dZ_x_d
     if(idx < dZ_x_dim * dZ_y_dim){
         int dZ_x = idx / dZ_x_dim;
         int dZ_y = idx % dZ_x_dim;
+
         atomicAdd(&params->B[dZ_y], -learning_rate * (dZ[dZ_x * dZ_y_dim + dZ_y] / dZ_y_dim));
-        //printf("B: %i %f \n", dZ_y, params->B[dZ_y]);
+        
+        if(idx == 5)
+            printf("Update B: %i %f \n", dZ_y, params->B[dZ_y]);
     }
 }
 
@@ -192,6 +212,7 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
             // Handle error appropriately
             exit(0);
         }
+        
         /// Relu Layer
         reLUForward<<<singleDimblockSize, singleDimnumBlocks>>>(d_Z1, d_A1, batchSize, 10);
         cudaDeviceSynchronize();
@@ -296,7 +317,6 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
             // Handle error appropriately
             exit(0);
         }
-
         linearBackProp<<<num_of_blocks, block_size>>>(d_dZ2, d_dZ1, d_params2, batchSize, 10, 10);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
@@ -305,7 +325,6 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
             // Handle error appropriately
             exit(0);
         }
-        //exit(0);
         reLUBack<<<singleDimblockSize, singleDimnumBlocks10>>>(d_Z1, d_dZ1, batchSize, 10);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
@@ -323,6 +342,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
             // Handle error appropriately
             exit(0);
         }
+        
         linearUpdateBias<<<singleDimblockSize, singleDimnumBlocks10>>>(d_dZ2, d_params2, batchSize, 10);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
@@ -388,28 +408,28 @@ __global__ void initParams(ParametersLinear *params1, ParametersLinear *params2)
         for(int j=0; j<784; j++){
             curandState_t globalState;
             curand_init(clock64() * i*j, 0, 0, &globalState);
-            params1->W[i*784 + j] = getRandomNumber(globalState);// / sqrtf(1./784.);
+            params1->W[i*784 + j] = getRandomNumber(globalState) * sqrtf(1./784.);
             //printf("W1: %i %f \n", i*784 + j, params1->W[i*784 + j]);
         }
     }
     for(int i=0; i<10; i++){
         curandState_t globalState;
         curand_init(clock64() + i, 0, 0, &globalState);
-        params1->B[i] = getRandomNumber(globalState);// / sqrtf(1./10.);
+        params1->B[i] = getRandomNumber(globalState) * sqrtf(1./10.);
         //printf("B1: %i %f \n", i, params1->B[i]);
     }
     for(int i=0; i<10; i++){
         for(int j=0; j<10; j++){
             curandState_t globalState;
             curand_init(clock64()*i,0 , 0, &globalState);
-            params2->W[i*10 + j] = getRandomNumber(globalState);// / sqrtf(1./20.);
+            params2->W[i*10 + j] = getRandomNumber(globalState) * sqrtf(1./20.);
             //printf("W2: %i %f \n", i*10 + j, params2->W[i*10 + j]);
         }
     }
     for(int i=0; i<10; i++){
         curandState_t globalState;
         curand_init(clock64()*i, 0, 0, &globalState);
-        params2->B[i] = getRandomNumber(globalState);// / sqrtf(1./10);
+        params2->B[i] = getRandomNumber(globalState) * sqrtf(1./10);
         //printf("B2: %i %f \n", i, params1->B[i]);
     }
 }
@@ -443,7 +463,7 @@ void getAccuracy(float *d_A2, unsigned char *d_labels, int *d_numImages){
     float *d_accuracy;
     int *d_predictions;
 
-    int n_images = 1000;
+    int n_images = 60000;
     cudaError_t err;
     cudaMalloc((void **)&d_accuracy, sizeof(float));
     cudaMalloc((void **)&d_predictions, n_images * sizeof(int));
@@ -575,7 +595,7 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
 
     float *d_data_original = d_data;
 
-    int iter = 10;
+    int iter =50;
     for(int i=0; i < iter; i++){
         printf("Iteration: %i \n", i);
         ForwardProp(d_data, d_params1, d_params2, d_numRows, d_numCols, h_numImages, h_numRows, h_numCols,
