@@ -142,7 +142,7 @@ __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params
 
     float dW_value = 0.0f;
 
-    float learning_rate = 0.1;
+    float learning_rate = .1 ;
 
     if(idx < W_x_dim && idy < W_y_dim){
         for(int i=0; i<dZ_x_dim; i++){
@@ -154,7 +154,6 @@ __global__ void linearUpdateWeight(float* A, float* dZ, ParametersLinear *params
 
         //printf("Update W: %i %i %f \n", idx * W_y_dim + idy, idx, dW_value/A_x_dim);
         params->W[idx * W_y_dim + idy] = params->W[idx * W_y_dim + idy] - learning_rate * dW_value/A_x_dim;
-
     }
 }
 
@@ -168,7 +167,7 @@ __global__ void calcDiffBias(float* dZ, float* dZ_sum, int size){
 __global__ void linearUpdateBias(float *dZ_sum, ParametersLinear *params, int dZ_x_dim){
     int idx = blockIdx.x * blockDim.x + threadIdx.x;    
 
-    float learning_rate = 0.1;
+    float learning_rate = .1;
 
     if(idx < dZ_x_dim){
         atomicAdd(&params->B[idx], -learning_rate * (*dZ_sum / (60000.)));
@@ -182,10 +181,14 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
     float *d_Z1, float *d_A1, float *d_Z2, float *d_A2){
 
     float *d_sum_exp; 
-    cudaMalloc((void**)&d_sum_exp, *h_numImages * 10 * sizeof(float));
+    cudaMalloc((void**)&d_sum_exp, *h_numImages * sizeof(float));
+
+    float* d_sum_exp_original = d_sum_exp;
 
     float* d_maxZ;
     cudaMalloc(&d_maxZ, *h_numImages * sizeof(float));
+
+    float* d_maxZ_original = d_maxZ;
 
     int matrixSize = *h_numImages * 784;
     //printf("Start Forward \n");
@@ -274,7 +277,7 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
         }
         /// Conduct the SoftMax
         softMax<<<singleDimnumBlocks10, singleDimblockSize>>>(d_Z2, d_A2, d_sum_exp, 
-        1000, 10);
+        10, 1000);
         cudaDeviceSynchronize();
         cudaError = cudaGetLastError();
         if (cudaError != cudaSuccess) {
@@ -288,7 +291,15 @@ void ForwardProp(float *d_X, ParametersLinear *d_params1, ParametersLinear *d_pa
         d_A1 += batchSize * 10;
         d_Z2 += batchSize * 10;
         d_A2 += batchSize * 10;
+
+        d_maxZ += batchSize;
+        d_sum_exp += batchSize;
     }
+    d_sum_exp = d_sum_exp_original;
+    d_maxZ = d_maxZ_original;
+    /// Free memory
+    cudaFree(d_sum_exp);
+    cudaFree(d_maxZ);
 }
 
 __global__ void startBackProp(float *d_Z2, float *d_A2, unsigned char *d_one_hot_Y, int Z_x_dim, int Z_y_dim){
@@ -339,6 +350,8 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
     cudaMalloc((void**)&d_B_T, 10 * 1 * sizeof(float));
     cudaMemcpy(&(d_params2_WT->B), &d_B_T, sizeof(float*), cudaMemcpyHostToDevice);
 
+    float *d_A1_T_original = d_A1_T;
+    float *d_A1_orgininal = d_A1;
 
     //cudaMemcpy(&(d_params2_WT->B), &(d_params2->B), sizeof(float*), cudaMemcpyHostToDevice);
     // Batches
@@ -372,6 +385,9 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
 
     float *d_dZ1_sum;
     cudaMalloc((void**)&d_dZ1_sum, sizeof(float));
+
+    d_A1_T = d_A1_T_original;
+    d_A1 = d_A1_orgininal;
 
     for (int i = 0; i < numBatches; i++) {
         //printf("Batch %i Start \n", i);
@@ -447,10 +463,15 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
         /// Pointer arith
         d_dZ2 += batchSize * 10;
         d_A2 += batchSize * 10;
+
         d_one_hot_Y += batchSize * 10;
+
         d_dZ1 += batchSize * 10;
         d_Z1 += batchSize * 10;
+
         d_A1 += batchSize * 10;
+        d_A1_T += batchSize * 10;
+
         d_data += batchSize * 784;
     }
 
@@ -470,6 +491,15 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
         // Handle error appropriately
         exit(0);
     }
+
+    d_A1_T = d_A1_T_original;
+
+    // Free memory cuda 
+    cudaFree(d_dZ2_sum);
+    cudaFree(d_dZ1_sum);
+    cudaFree(d_A1_T);
+    cudaFree(d_params2_WT);
+
 }   
 
 __global__ void one_hot_encode(unsigned char* labels, unsigned char* output, int numLabels, int numClasses) {
@@ -580,6 +610,7 @@ void getAccuracy(float *d_A2, unsigned char *d_labels, int *d_numImages){
     }
 
     float *h_accuracy = (float*)malloc(sizeof(float));
+    *h_accuracy = 0;
     cudaMemcpy(h_accuracy, d_accuracy, sizeof(float), cudaMemcpyDeviceToHost);
     printf("NAcc: %f \n", *h_accuracy);
     printf("Accuracy: %f \n", *h_accuracy / n_images);
@@ -641,6 +672,9 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
 
     dim3 block_size(16,16);
 
+    float *d_data_T_original = d_data_T;
+    float *d_data_original = d_data;
+
     int batchSize = 1000;
 
     for (int i = 0; i < *h_numImages; i += batchSize) {
@@ -655,6 +689,9 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
             exit(0);
         }
     }
+
+    d_data = d_data_original;
+    d_data_T = d_data_T_original;
 
     cudaMemcpy(d_numImages, h_numImages, sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_numRows, h_numRows, sizeof(int), cudaMemcpyHostToDevice);
@@ -705,9 +742,12 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
     float *d_Z1_orgininal = d_Z1;
     float *d_Z2_orgininal = d_Z2;
 
-    float *d_data_original = d_data;
+    float* d_dZ1_original = d_dZ1;
+    float* d_dZ2_orgininal = d_dZ2;
 
-    int iter = 100;
+    unsigned char* d_one_hot_orgininal = d_one_hot;
+
+    int iter = 1000;
     for(int i=0; i < iter; i++){
         printf("Iteration: %i \n", i);
         ForwardProp(d_data_T, d_params1, d_params2, d_numRows, d_numCols, h_numImages, h_numRows, h_numCols,
@@ -718,16 +758,24 @@ void NeuralNetwork(float *h_data, int *h_numImages, int *h_numRows, int *h_numCo
         d_Z1 = d_Z1_orgininal; 
         d_Z2 = d_Z2_orgininal;
 
+        d_data_T = d_data_T_original;
         d_data = d_data_original;
         
         BackProp(d_Z1, d_A1, d_A2, d_params1, d_params2, d_one_hot, d_data, d_dZ2, d_dZ1, h_numImages, h_numRows, h_numCols);
+        
+        d_dZ1 = d_dZ1_original;
+        d_dZ2 = d_dZ2_orgininal;
 
         d_A1 = d_A1_orgininal; 
         d_A2 = d_A2_orgininal; 
         d_Z1 = d_Z1_orgininal; 
         d_Z2 = d_Z2_orgininal;
-
+        
+        d_data_T = d_data_T_original;
         d_data = d_data_original;
+
+        d_one_hot = d_one_hot_orgininal;
+
         getAccuracy(d_A2, d_labels, d_numImages);
     }
 }
