@@ -454,7 +454,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
         d_data += batchSize * 784;
     }
 
-    linearUpdateBias<<<singleDimnumBlocks10, singleDimblockSize>>>(d_dZ2_sum, d_params2, batchSize);
+    linearUpdateBias<<<singleDimnumBlocks10, singleDimblockSize>>>(d_dZ2_sum, d_params2, 10);
     cudaDeviceSynchronize();
     cudaError = cudaGetLastError();
     if (cudaError != cudaSuccess) {
@@ -462,7 +462,7 @@ void BackProp(float *d_Z1, float *d_A1, float *d_A2, ParametersLinear *d_params1
         // Handle error appropriately
         exit(0);
     }
-    linearUpdateBias<<<singleDimnumBlocks10x10, singleDimblockSize>>>(d_dZ1_sum, d_params1, batchSize);
+    linearUpdateBias<<<_singleDimnumBlocks10, singleDimblockSize>>>(d_dZ1_sum, d_params1, 10);
     cudaDeviceSynchronize();
     cudaError = cudaGetLastError();
     if (cudaError != cudaSuccess) {
