@@ -1,4 +1,4 @@
-# Cuda Corner
+# GPU Corner
 This is just a place for me to explore the expanding space of parallel computing on GPUs. It will contain some scripts I created while learning and also some small projects which are found below
 
 ## Projects
